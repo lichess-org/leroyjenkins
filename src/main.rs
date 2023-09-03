@@ -41,13 +41,9 @@ struct Args {
     #[arg(short, long)]
     ipv4_set_name: String,
 
-    /// The name of the ipset for ipv4
+    /// The max size of the ipset
     #[arg(short, long, default_value = "10000000")]
     max_set_size: u32,
-
-    /// The name of the ipset for ipv4
-    #[arg(short, long, default_value = "8")]
-    num_threads: u32,
 
     /// The number of seconds to accumulate ban counts before reporting and resetting.
     #[arg(short, long, default_value = "600")]
@@ -124,6 +120,7 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
                                 ban_count,
                                 ban_count_start.elapsed()
                             );
+                            ban_count = 0;
                             ban_count_start = Instant::now();
                         }
                     }
@@ -132,6 +129,7 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
             }
             if ip_count_start.elapsed().as_millis() > args.ip_reporting_time_period * 1000 {
                 info!("Seen {} ips since {:?}", ip_count, ip_count_start.elapsed());
+                ip_count = 0;
                 ip_count_start = Instant::now();
             }
             line.clear();
