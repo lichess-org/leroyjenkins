@@ -1,9 +1,10 @@
 # Leroy Jenkins
 Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_QD4a4) amongst [too much planning and inaction](https://www.youtube.com/watch?v=km5FAAQLUT8)
 
-# Use
+# Usage
+NOTE: must be run with enough priveleges to actually create and add to ipsets. :joy:
 ```
-RUST_LOG=info leroyjenkins --ban-log=/tmp/foo.txt --time-to-live=20 --instances-before-ban=100 --first-ban-time=100 --ipv6-set-name leroy6 --ipv4-set-name leroy4 --ip-reporting-time-period=1 --ban-reporting-time-period=1
+RUST_LOG=info ./target/release/leroyjenkins --bl-file=/tmp/foo.txt --bl-ttl=20 --bl-threshold=100 --ipset-base-time=100 --ipset-ban-ttl=86400 --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4 --reporting-ip-time-period=1 --reporting-ban-time-period=1
 ```
 
 # Info
