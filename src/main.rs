@@ -182,7 +182,9 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
 fn main() -> io::Result<()> {
     pretty_env_logger::init();
     let args = Args::parse();
-    info!("🔨🔨LEEEEEEEERRRRRROOOOOYYYYYYYYYY JJEEEEEENNNNNNNKKKKKKKIIIIIIINNNNNSSSSSSS🔨🔨");
+    info!(
+        "🔨🪓🪖🥚LEEEEEEEERRRRRROOOOOYYYYYYYYYY JJEEEEEENNNNNNNKKKKKKKIIIIIIINNNNNSSSSSSS🥚🪖🪓🔨"
+    );
     follow_banlog(&args)?;
     Ok(())
 }
