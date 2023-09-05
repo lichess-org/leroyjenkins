@@ -10,6 +10,7 @@ use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::io::{self, BufRead, BufReader};
 use std::net::IpAddr;
+use std::process::exit;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::time::Instant;
@@ -76,7 +77,35 @@ fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T
     }
 }
 
+fn ensure_ipset_exists(name: &String) {
+    match Command::new("ipset")
+        .args(["list", name, "-t"])
+        .output()
+        .map(|s| {
+            !String::from_utf8_lossy(&s.stderr)
+                .contains("The set with the given name does not exist")
+        }) {
+        Ok(exists) => {
+            if !exists {
+                error!(
+                    "{} does not exist within ipset, please create it before running {}.",
+                    name,
+                    env!("CARGO_PKG_NAME")
+                );
+                exit(-1);
+            }
+        }
+        Err(e) => {
+            error!("failed to run ipset to check if the given set exists. Have you installed it?\n: {:?}", e);
+            exit(-1);
+        }
+    }
+}
+
 fn follow_banlog(args: &Args) -> io::Result<()> {
+    ensure_ipset_exists(&args.ipset_ipv4_name);
+    ensure_ipset_exists(&args.ipset_ipv6_name);
+
     let mut ipv4 = Session::<HashIp>::new(args.ipset_ipv4_name.clone());
     let mut ipv6 = Session::<HashIp>::new(args.ipset_ipv6_name.clone());
     let mut cmd = Command::new("tail")
