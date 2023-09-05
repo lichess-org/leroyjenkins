@@ -78,27 +78,7 @@ fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T
 
 fn follow_banlog(args: &Args) -> io::Result<()> {
     let mut ipv4 = Session::<HashIp>::new(args.ipset_ipv4_name.clone());
-    log_and_ignore_err(
-        "Error creating ipv4 set {}",
-        ipv4.create(|builder| {
-            builder
-                .with_ipv6(false)?
-                .with_timeout(args.ipset_base_time)?
-                .with_max_elem(args.ipset_max_size)?
-                .build()
-        }),
-    );
     let mut ipv6 = Session::<HashIp>::new(args.ipset_ipv6_name.clone());
-    log_and_ignore_err(
-        "Error creating ipv6 set {}",
-        ipv6.create(|builder| {
-            builder
-                .with_ipv6(true)?
-                .with_timeout(args.ipset_base_time)?
-                .with_max_elem(args.ipset_max_size)?
-                .build()
-        }),
-    );
     let mut cmd = Command::new("tail")
         .args(vec!["-F", &args.bl_file.clone()[..]])
         .stdout(Stdio::piped())
