@@ -43,28 +43,33 @@ struct Args {
 
     /// (In seconds): The time of the first ban. Each subsequent ban will be increased
     /// linearly by this amount (ban_count * base_time)
-    #[arg(short, long)]
+    #[arg(long)]
     ipset_base_time: u32,
 
     /// The name of the ipset for ipv6
-    #[arg(short, long)]
+    #[arg(long)]
     ipset_ipv6_name: String,
 
     /// The name of the ipset for ipv4
-    #[arg(short, long)]
+    #[arg(long)]
     ipset_ipv4_name: String,
 
     /// The max size of both ipsets.
-    #[arg(short, long, default_value = "10000000")]
+    #[arg(long, default_value = "10000000")]
     ipset_max_size: u32,
 
     /// The number of seconds to accumulate ban counts before reporting and resetting.
-    #[arg(short, long, default_value = "600")]
+    #[arg(long, default_value = "600")]
     reporting_ban_time_period: u128,
 
     /// The number of seconds to accumulate ip counts before reporting and resetting.
-    #[arg(short, long, default_value = "600")]
+    #[arg(long, default_value = "600")]
     reporting_ip_time_period: u128,
+
+    /// The number of elements to keep in the cache that we use, larger is more memory
+    /// smaller is probably slightly faster, but maybe not.
+    #[arg(long, default_value = "500000")]
+    cache_max_size: u64,
 }
 
 fn time_to_ban(args: &Args, ban_count: u32) -> u32 {
@@ -120,14 +125,12 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
         info!("Following {:?}", args.bl_file);
 
         let mut ban_log_count_cache: Cache<_, _, BuildHasherDefault<FxHasher>> = Cache::builder()
-            // Max 10,000 elements
-            .max_capacity(500_000) // TODO: I made this number up?
+            .max_capacity(args.cache_max_size)
             .time_to_live(Duration::from_secs(args.bl_ttl))
             .build_with_hasher(Default::default());
 
         let mut ipset_ban_count_cache: Cache<_, _, BuildHasherDefault<FxHasher>> = Cache::builder()
-            // Max 10,000 elements
-            .max_capacity(500_000) // TODO: I made this number up?
+            .max_capacity(args.cache_max_size)
             .time_to_live(Duration::from_secs(args.ipset_ban_ttl))
             .build_with_hasher(Default::default());
 
