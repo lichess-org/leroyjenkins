@@ -3,7 +3,7 @@ use ipset::types::HashIp;
 use ipset::Session;
 use log::{error, info};
 use mini_moka::unsync::Cache;
-use pretty_env_logger;
+
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::io::{self, BufRead, BufReader};
@@ -147,7 +147,7 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
                 match line[..line.len() - 1].parse::<IpAddr>() {
                     Ok(ip) => {
                         ban_count += 1;
-                        _ = match ip {
+                        match ip {
                             IpAddr::V4(_) => {
                                 log_and_ignore_err(
                                     "Unable to add to ipv4 set",
