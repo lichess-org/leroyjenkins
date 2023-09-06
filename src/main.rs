@@ -1,11 +1,9 @@
-extern crate pretty_env_logger;
-#[macro_use]
-extern crate log;
-
 use clap::Parser;
 use ipset::types::HashIp;
 use ipset::Session;
+use log::{error, info};
 use mini_moka::unsync::Cache;
+use pretty_env_logger;
 use rustc_hash::FxHasher;
 use std::hash::BuildHasherDefault;
 use std::io::{self, BufRead, BufReader};
