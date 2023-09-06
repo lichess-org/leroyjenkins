@@ -195,6 +195,5 @@ fn main() -> io::Result<()> {
     info!(
         "🔨🪓🪖🥚LEEEEEEEERRRRRROOOOOYYYYYYYYYY JJEEEEEENNNNNNNKKKKKKKIIIIIIINNNNNSSSSSSS🥚🪖🪓🔨"
     );
-    follow_banlog(&args)?;
-    Ok(())
+    follow_banlog(&args)
 }
