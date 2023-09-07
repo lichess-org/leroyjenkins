@@ -25,8 +25,8 @@ fi
 export RUST_LOG=info
 leroyjenkins \
   --bl-file=/var/log/nginx/lichess.rate_limit.ip.log \
-  --bl-ttl=20 \
-  --bl-threshold=100 \
+  --bl-ttl=60 \
+  --bl-threshold=10 \
   --ipset-base-time=$base_time \
   --ipset-ban-ttl=86400 \
   --ipset-ipv6-name=$set6 \
