@@ -31,6 +31,6 @@ leroyjenkins \
   --ipset-ban-ttl=86400 \
   --ipset-ipv6-name=$set6 \
   --ipset-ipv4-name=$set4 \
-  --reporting-ip-time-period=5 \
-  --reporting-ban-time-period=60
+  --reporting-ip-time-period=60 \
+  --reporting-ban-time-period=5
 
