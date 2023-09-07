@@ -15,11 +15,11 @@ echo "Creating set leroy6"
 ipset -exist create $set6 hash:net family inet6 timeout $base_time hashsize 16384 forceadd
 
 # IPtables rules
-if ! iptables  -C INPUT -m set --match-set leroy4 src -j LOG 2>/dev/null ; then
-  iptables  -I INPUT -m set --match-set leroy4 src -j LOG
+if ! iptables  -C INPUT -m set --match-set leroy4 src -j LOG --log-prefix "Leroyed: " 2>/dev/null ; then
+  iptables  -I INPUT -m set --match-set leroy4 src -j LOG --log-prefix "Leroyed: "
 fi
-if ! ip6tables  -C INPUT -m set --match-set leroy6 src -j LOG 2>/dev/null ; then
-  ip6tables -I INPUT -m set --match-set leroy6 src -j LOG
+if ! ip6tables  -C INPUT -m set --match-set leroy6 src -j LOG --log-prefix "Leroyed: " 2>/dev/null ; then
+  ip6tables -I INPUT -m set --match-set leroy6 src -j LOG --log-prefix "Leroyed: "
 fi
 
 export RUST_LOG=info
