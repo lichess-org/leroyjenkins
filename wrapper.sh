@@ -26,11 +26,11 @@ export RUST_LOG=info
 leroyjenkins \
   --bl-file=/var/log/nginx/lichess.rate_limit.ip.log \
   --bl-ttl=60 \
-  --bl-threshold=20 \
+  --bl-threshold=15 \
   --ipset-base-time=$base_time \
   --ipset-ban-ttl=86400 \
   --ipset-ipv6-name=$set6 \
   --ipset-ipv4-name=$set4 \
-  --reporting-ip-time-period=60 \
+  --reporting-ip-time-period=1 \
   --reporting-ban-time-period=5
 
