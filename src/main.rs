@@ -1,17 +1,16 @@
+use std::{
+    hash::BuildHasherDefault,
+    io::{self, BufRead, BufReader},
+    net::IpAddr,
+    process::{exit, Command, Stdio},
+    time::{Duration, Instant},
+};
+
 use clap::Parser;
-use ipset::types::HashIp;
-use ipset::Session;
+use ipset::{types::HashIp, Session};
 use log::{error, info};
 use mini_moka::unsync::Cache;
-
 use rustc_hash::FxHasher;
-use std::hash::BuildHasherDefault;
-use std::io::{self, BufRead, BufReader};
-use std::net::IpAddr;
-use std::process::exit;
-use std::process::{Command, Stdio};
-use std::time::Duration;
-use std::time::Instant;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
