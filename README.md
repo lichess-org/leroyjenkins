@@ -7,7 +7,7 @@ cargo +nightly build --release
 ```
 
 # Usage
-NOTE: must be run with enough priveleges to actually create and add to ipsets. :joy:
+NOTE: must be run with enough privileges to actually create and add to ipsets. :joy:
 ```sh
 RUST_LOG=info ./target/release/leroyjenkins --bl-file=/tmp/foo.txt --bl-ttl=20 --bl-threshold=100 --ipset-base-time=100 --ipset-ban-ttl=86400 --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4 --reporting-ip-time-period=1 --reporting-ban-time-period=1
 ```
