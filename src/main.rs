@@ -1,7 +1,7 @@
 use std::{
     hash::BuildHasherDefault,
     io::{self, BufRead, BufReader},
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     process::{exit, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -43,13 +43,13 @@ struct Args {
     #[arg(long)]
     ipset_base_time: u32,
 
-    /// The name of the ipset for ipv6
-    #[arg(long)]
-    ipset_ipv6_name: String,
-
     /// The name of the ipset for ipv4
     #[arg(long)]
     ipset_ipv4_name: String,
+
+    /// The name of the ipset for ipv6
+    #[arg(long)]
+    ipset_ipv6_name: String,
 
     /// The max size of both ipsets.
     #[arg(long, default_value = "10000000")]
@@ -79,37 +79,19 @@ fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T
     }
 }
 
-fn ensure_ipset_exists(name: &String) {
-    match Command::new("ipset")
-        .args(["list", name, "-t"])
-        .output()
-        .map(|s| {
-            !String::from_utf8_lossy(&s.stderr)
-                .contains("The set with the given name does not exist")
-        }) {
-        Ok(exists) => {
-            if !exists {
-                error!(
-                    "{} does not exist within ipset, please create it before running {}.",
-                    name,
-                    env!("CARGO_PKG_NAME")
-                );
-                exit(-1);
-            }
-        }
-        Err(e) => {
-            error!("failed to run ipset to check if the given set exists. Have you installed it?\n: {:?}", e);
-            exit(-1);
-        }
-    }
-}
-
 fn follow_banlog(args: &Args) -> io::Result<()> {
-    ensure_ipset_exists(&args.ipset_ipv4_name);
-    ensure_ipset_exists(&args.ipset_ipv6_name);
-
     let mut ipv4 = Session::<HashIp>::new(args.ipset_ipv4_name.clone());
+    if let Err(err) = ipv4.test(IpAddr::V4(Ipv4Addr::LOCALHOST)) {
+        error!("failed to test ipv4 set: {err:?}. please create before running.");
+        exit(-1);
+    }
+
     let mut ipv6 = Session::<HashIp>::new(args.ipset_ipv6_name.clone());
+    if let Err(err) = ipv6.test(IpAddr::V6(Ipv6Addr::LOCALHOST)) {
+        error!("failed to test ipv6 set: {err:?}. please create before running.");
+        exit(-1);
+    }
+
     let mut cmd = Command::new("tail")
         .args(vec!["-F", &args.bl_file.clone()[..]])
         .stdout(Stdio::piped())
