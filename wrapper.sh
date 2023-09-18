@@ -56,8 +56,7 @@ fi
 
 
 export RUST_LOG=info
-leroyjenkins \
-  --bl-file=/var/log/nginx/lichess.rate_limit.ip.log \
+tail -F /var/log/nginx/lichess.rate_limit.ip.log | leroyjenkins \
   --bl-ttl=60 \
   --bl-threshold=15 \
   --ipset-base-time=$base_time \
@@ -66,4 +65,3 @@ leroyjenkins \
   --ipset-ipv4-name=$set4 \
   --reporting-ip-time-period=1 \
   --reporting-ban-time-period=5
-
