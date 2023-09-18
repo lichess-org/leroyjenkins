@@ -58,11 +58,11 @@ struct Args {
 
     /// The number of seconds to accumulate ban counts before reporting and resetting.
     #[arg(long, default_value = "600")]
-    reporting_ban_time_period: u128,
+    reporting_ban_time_period: u64,
 
     /// The number of seconds to accumulate ip counts before reporting and resetting.
     #[arg(long, default_value = "600")]
-    reporting_ip_time_period: u128,
+    reporting_ip_time_period: u64,
 
     /// The number of elements to keep in the cache that we use, larger is more memory
     /// smaller is probably slightly faster, but maybe not.
@@ -161,8 +161,8 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
                                 );
                             }
                         };
-                        if ban_count_start.elapsed().as_millis()
-                            > args.reporting_ban_time_period * 1000
+                        if ban_count_start.elapsed()
+                            > Duration::from_secs(args.reporting_ban_time_period)
                         {
                             info!(
                                 "Banned {} ips in the past {:?}",
@@ -176,7 +176,7 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
                     Err(e) => error!("Error parsing ip line: {:?}", e),
                 }
             }
-            if ip_count_start.elapsed().as_millis() > args.reporting_ip_time_period * 1000 {
+            if ip_count_start.elapsed() > Duration::from_secs(args.reporting_ip_time_period) {
                 info!("Seen {} ips since {:?}", ip_count, ip_count_start.elapsed());
                 ip_count = 0;
                 ip_count_start = Instant::now();
