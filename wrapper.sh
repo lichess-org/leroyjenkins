@@ -4,7 +4,7 @@
 
 set4=leroy4
 set6=leroy6
-base_time=100
+base_time=30
 
 # IPSet lists, do not error when they already exist, if you want to
 # update their properties just delete them manually and call the
@@ -57,10 +57,10 @@ fi
 
 export RUST_LOG=info
 tail -F /var/log/nginx/lichess.rate_limit.ip.log | leroyjenkins \
-  --bl-ttl=60 \
-  --bl-threshold=15 \
+  --bl-ttl=30 \
+  --bl-threshold=10 \
   --ipset-base-time=$base_time \
-  --ipset-ban-ttl=86400 \
+  --ipset-ban-ttl=3600 \
   --ipset-ipv6-name=$set6 \
   --ipset-ipv4-name=$set4 \
   --reporting-ip-time-period=1 \
