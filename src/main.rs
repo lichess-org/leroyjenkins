@@ -47,10 +47,6 @@ struct Args {
     #[arg(long)]
     ipset_ipv6_name: String,
 
-    /// The max size of both ipsets.
-    #[arg(long, default_value = "10000000")]
-    ipset_max_size: u32,
-
     /// The number of seconds to accumulate ban counts before reporting and resetting.
     #[arg(long, default_value = "10")]
     reporting_ban_time_period: u64,
