@@ -94,8 +94,8 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
         .time_to_live(Duration::from_secs(args.ipset_ban_ttl))
         .build_with_hasher(Default::default());
 
-    let mut ban_count = 0;
-    let mut ip_count = 0;
+    let mut ban_count: u64 = 0;
+    let mut ip_count: u64 = 0;
 
     let mut ban_count_start = Instant::now();
     let mut ip_count_start = Instant::now();
