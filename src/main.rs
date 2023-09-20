@@ -101,14 +101,15 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
     let mut ip_count_start = Instant::now();
 
     let mut stdin = io::stdin().lock();
-    let mut line = String::new();
-    while stdin.read_line(&mut line)? != 0 {
+    let mut ip_addr = String::new();
+    while stdin.read_line(&mut ip_addr)? != 0 {
         ip_count += 1;
-        let ban_log_count: u32 = *ban_log_count_cache.get(&line).unwrap_or(&0) + 1;
-        ban_log_count_cache.insert(line.clone(), ban_log_count);
+        let ban_log_count: u32 = *ban_log_count_cache.get(&ip_addr).unwrap_or(&0) + 1;
+        ban_log_count_cache.insert(ip_addr.clone(), ban_log_count);
         if ban_log_count + 1 >= args.bl_threshold {
-            let ipset_ban_count: u32 = *ipset_ban_count_cache.get(&line).unwrap_or(&0) + 1;
-            match line[..line.len() - 1].parse::<IpAddr>() {
+            let ipset_ban_count: u32 = *ipset_ban_count_cache.get(&ip_addr).unwrap_or(&0) + 1;
+            ipset_ban_count_cache.insert(ip_addr.clone(), ipset_ban_count);
+            match ip_addr[..ip_addr.len() - 1].parse::<IpAddr>() {
                 Ok(ip) => {
                     ban_count += 1;
                     match ip {
@@ -145,7 +146,7 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
             ip_count = 0;
             ip_count_start = Instant::now();
         }
-        line.clear();
+        ip_addr.clear();
     }
 
     Ok(())
