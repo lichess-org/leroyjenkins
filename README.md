@@ -17,4 +17,4 @@ tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-ttl=20 -
 ```
 
 # Info
-This program assumes it's able to use `tail -F` to follow a file which will have single IP addresses written to each line. When a given IP address shows up too often before their cache times out, then it will add it to the provided ipset which can be used with iptables to limit traffic
+leroyjenkins reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will added to the ipset with the specified timeout. Note that leroyjenkins itself does nothing wrt to your iptable rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
