@@ -1,6 +1,6 @@
 use std::{
     hash::BuildHasherDefault,
-    io::{self, BufRead},
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     process::exit,
     time::{Duration, Instant},
@@ -115,7 +115,7 @@ struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
     ban_log_count_cache: Cache<String, u32, BuildHasherDefault<FxHasher>>,
-    recidivism_counts: Cache<String, u32, BuildHasherDefault<FxHasher>>,
+    recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     ban_count: u64,
     ip_count: u64,
@@ -136,7 +136,7 @@ impl Leroy {
                 };
                 let mut session = Session::<HashIp>::new(name.clone());
                 if let Err(err) = session.test(localhost) {
-                    error!("failed to test set {name:?}: {err:?}. please create before running.");
+                    error!("Failed to test set {name:?}: {err:?}. Please create before running.");
                     exit(-1);
                 }
                 session
@@ -157,38 +157,15 @@ impl Leroy {
         }
     }
 
-    fn handle_ip_addr(&mut self, ip_addr: &String) {
+    fn handle_line(&mut self, ip_addr: String) {
         self.ip_count += 1;
-        let ban_log_count: u32 = *self.ban_log_count_cache.get(ip_addr).unwrap_or(&0) + 1;
-        self.ban_log_count_cache
-            .insert(ip_addr.into(), ban_log_count);
+
+        let ban_log_count: u32 = *self.ban_log_count_cache.get(&ip_addr).unwrap_or(&0) + 1;
         if ban_log_count >= self.args.bl_threshold {
-            let recidivism: u32 = *self.recidivism_counts.get(ip_addr).unwrap_or(&0) + 1;
-            self.recidivism_counts.insert(ip_addr.into(), recidivism);
-            match ip_addr.parse::<IpAddr>() {
-                Ok(ip) => {
-                    self.ban_count += 1;
-                    log_and_ignore_err(
-                        "Unable to add to set",
-                        self.sessions
-                            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-                            .add(ip, Some(time_to_ban(&self.args, recidivism))),
-                    );
-                    if self.ban_count_start.elapsed()
-                        > Duration::from_secs(self.args.reporting_ban_time_period)
-                    {
-                        info!(
-                            "Banned {} ips in the past {:?}",
-                            self.ban_count,
-                            self.ban_count_start.elapsed()
-                        );
-                        self.ban_count = 0;
-                        self.ban_count_start = Instant::now();
-                    }
-                }
-                Err(e) => error!("Error parsing ip line: {:?}", e),
-            }
+            self.ban(&ip_addr);
         }
+        self.ban_log_count_cache.insert(ip_addr, ban_log_count);
+
         if self.ip_count_start.elapsed() > Duration::from_secs(self.args.reporting_ip_time_period) {
             info!(
                 "Seen {} ips since {:?}",
@@ -199,21 +176,54 @@ impl Leroy {
             self.ip_count_start = Instant::now();
         }
     }
+
+    fn ban(&mut self, ip_addr: &str) {
+        let ip: IpAddr = match ip_addr.parse() {
+            Ok(ip) => ip,
+            Err(err) => {
+                error!("Error parsing IP from {ip_addr:?}: {err}");
+                return;
+            }
+        };
+
+        self.ban_count += 1;
+
+        let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
+        self.recidivism_counts.insert(ip, recidivism);
+
+        log_and_ignore_err(
+            "Unable to add to set",
+            self.sessions
+                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+                .add(ip, Some(time_to_ban(&self.args, recidivism))),
+        );
+
+        if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
+        {
+            info!(
+                "Banned {} ips in the past {:?}",
+                self.ban_count,
+                self.ban_count_start.elapsed()
+            );
+            self.ban_count = 0;
+            self.ban_count_start = Instant::now();
+        }
+    }
 }
 
 fn main() -> io::Result<()> {
     pretty_env_logger::init();
+
     let args = Args::parse();
     info!(
         "🔨🪓🪖🥚LEEEEEEEERRRRRROOOOOYYYYYYYYYY JJEEEEEENNNNNNNKKKKKKKIIIIIIINNNNNSSSSSSS🥚🪖🪓🔨"
     );
     info!("{:?}", args);
+
     let mut leroy = Leroy::new(args);
-    let mut stdin = io::stdin().lock();
-    let mut line = String::new();
-    while stdin.read_line(&mut line)? != 0 {
-        leroy.handle_ip_addr(&line);
-        line.clear();
+    for line in io::stdin().lines() {
+        leroy.handle_line(line?);
     }
+
     Ok(())
 }
