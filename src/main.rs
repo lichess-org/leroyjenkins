@@ -69,12 +69,6 @@ impl Args {
     }
 }
 
-fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T, E>) {
-    if let Err(e) = res {
-        error!("{}: {:?}", prefix, e);
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 enum IpFamily {
     V4,
@@ -196,12 +190,13 @@ impl Leroy {
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         self.recidivism_counts.insert(ip, recidivism);
 
-        log_and_ignore_err(
-            "Unable to add to set",
-            self.sessions
-                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-                .add(ip, Some(self.args.seconds_to_ban(recidivism))),
-        );
+        if let Err(err) = self
+            .sessions
+            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+            .add(ip, Some(self.args.seconds_to_ban(recidivism)))
+        {
+            error!("Unable to add {ip} to set: {err}");
+        }
 
         if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
         {
