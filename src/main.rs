@@ -63,8 +63,10 @@ struct Args {
     cache_max_size: u64,
 }
 
-fn time_to_ban(args: &Args, ban_count: u32) -> u32 {
-    args.ipset_base_time * ban_count
+impl Args {
+    fn seconds_to_ban(&self, ban_count: u32) -> u32 {
+        self.ipset_base_time * ban_count
+    }
 }
 
 fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T, E>) {
@@ -198,7 +200,7 @@ impl Leroy {
             "Unable to add to set",
             self.sessions
                 .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-                .add(ip, Some(time_to_ban(&self.args, recidivism))),
+                .add(ip, Some(self.args.seconds_to_ban(recidivism))),
         );
 
         if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
