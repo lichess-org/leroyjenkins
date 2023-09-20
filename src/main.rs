@@ -135,7 +135,7 @@ impl Leroy {
                 };
                 let mut session = Session::<HashIp>::new(name.clone());
                 if let Err(err) = session.test(localhost) {
-                    error!("Failed to test set {name:?}: {err:?}. Please create before running.");
+                    error!("Failed to test set {name:?}: {err}. Please create before running.");
                     exit(-1);
                 }
                 session
