@@ -56,4 +56,4 @@ tail -F /var/log/nginx/lichess.rate_limit.ip.log | leroyjenkins \
   --ipset-ipv6-name=$set6 \
   --ipset-ipv4-name=$set4 \
   --reporting-ip-time-period=1 \
-  --reporting-ban-time-period=5
+  --reporting-ban-time-period=1
