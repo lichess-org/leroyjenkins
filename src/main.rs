@@ -185,7 +185,11 @@ impl Leroy {
         let ip: IpAddr = match IpAddr::parse_ascii(ip) {
             Ok(ip) => ip,
             Err(err) => {
-                error!("Error parsing IP from {ip:?}: {err}");
+                error!(
+                    "Error parsing IP from {:?}: {}",
+                    String::from_utf8_lossy(ip),
+                    err
+                );
                 return;
             }
         };
