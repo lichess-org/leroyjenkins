@@ -147,10 +147,12 @@ impl Leroy {
                 Ok(session)
             })?,
             ban_log_count_cache: Cache::builder()
+                .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
                 .time_to_live(Duration::from_secs(args.bl_ttl))
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
+                .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
                 .time_to_live(Duration::from_secs(args.ipset_ban_ttl))
                 .build_with_hasher(Default::default()),
