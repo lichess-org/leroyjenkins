@@ -52,11 +52,11 @@ struct Args {
     ipset_max_size: u32,
 
     /// The number of seconds to accumulate ban counts before reporting and resetting.
-    #[arg(long, default_value = "600")]
+    #[arg(long, default_value = "10")]
     reporting_ban_time_period: u64,
 
     /// The number of seconds to accumulate ip counts before reporting and resetting.
-    #[arg(long, default_value = "600")]
+    #[arg(long, default_value = "10")]
     reporting_ip_time_period: u64,
 
     /// The number of elements to keep in the cache that we use, larger is more memory
