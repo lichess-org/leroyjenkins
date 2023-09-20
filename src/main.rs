@@ -10,7 +10,7 @@ use std::{
 
 use clap::Parser;
 use ipset::{types::HashIp, Session};
-use log::{error, info};
+use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use rustc_hash::FxHasher;
 
@@ -61,6 +61,10 @@ struct Args {
     /// smaller is probably slightly faster, but maybe not.
     #[arg(long, default_value = "500000")]
     cache_max_size: u64,
+
+    /// Do not actually actually test or manage ipsets.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 impl Args {
@@ -134,9 +138,11 @@ impl Leroy {
                     IpFamily::V6 => (&args.ipset_ipv6_name, IpAddr::V6(Ipv6Addr::LOCALHOST)),
                 };
                 let mut session = Session::<HashIp>::new(name.clone());
-                session.test(localhost).map_err(|err| {
-                    format!("Failed to test set {name:?}: {err}. Please create before running.")
-                })?;
+                if !args.dry_run {
+                    session.test(localhost).map_err(|err| {
+                        format!("Failed to test set {name:?}: {err}. Please create before running.")
+                    })?;
+                }
                 Ok(session)
             })?,
             ban_log_count_cache: Cache::builder()
@@ -189,12 +195,17 @@ impl Leroy {
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         self.recidivism_counts.insert(ip, recidivism);
 
-        if let Err(err) = self
-            .sessions
-            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-            .add(ip, Some(self.args.seconds_to_ban(recidivism)))
-        {
-            error!("Unable to add {ip} to set: {err}");
+        let timeout = self.args.seconds_to_ban(recidivism);
+        debug!("Banning {ip} for {timeout}s");
+
+        if !self.args.dry_run {
+            if let Err(err) = self
+                .sessions
+                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+                .add(ip, Some(timeout))
+            {
+                error!("Unable to add {ip} to set: {err}");
+            }
         }
 
         if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
