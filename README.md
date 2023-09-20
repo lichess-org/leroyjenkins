@@ -5,6 +5,10 @@ Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_Q
 ```sh
 cargo +nightly build --release
 ```
+You may need to install the nightly toolchain with rustup:
+```sh
+rustup toolchain install nightly
+```
 
 # Usage
 NOTE: must be run with enough privileges to actually create and add to ipsets. :joy:
