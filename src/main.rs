@@ -1,10 +1,10 @@
 #![feature(addr_parse_ascii)]
 
 use std::{
+    error::Error,
     hash::BuildHasherDefault,
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    process::exit,
     time::{Duration, Instant},
 };
 
@@ -92,14 +92,14 @@ struct ByIpFamily<T> {
 }
 
 impl<T> ByIpFamily<T> {
-    fn new_with<F>(mut init: F) -> ByIpFamily<T>
+    fn try_new_with<F, E>(mut init: F) -> Result<ByIpFamily<T>, E>
     where
-        F: FnMut(IpFamily) -> T,
+        F: FnMut(IpFamily) -> Result<T, E>,
     {
-        ByIpFamily {
-            ipv4: init(IpFamily::V4),
-            ipv6: init(IpFamily::V6),
-        }
+        Ok(ByIpFamily {
+            ipv4: init(IpFamily::V4)?,
+            ipv6: init(IpFamily::V6)?,
+        })
     }
 
     fn by_family_mut(&mut self, family: IpFamily) -> &mut T {
@@ -126,20 +126,19 @@ struct Leroy {
 }
 
 impl Leroy {
-    fn new(args: Args) -> Leroy {
-        Leroy {
-            sessions: ByIpFamily::new_with(|family| {
+    fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
+        Ok(Leroy {
+            sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
                 let (name, localhost) = match family {
                     IpFamily::V4 => (&args.ipset_ipv4_name, IpAddr::V4(Ipv4Addr::LOCALHOST)),
                     IpFamily::V6 => (&args.ipset_ipv6_name, IpAddr::V6(Ipv6Addr::LOCALHOST)),
                 };
                 let mut session = Session::<HashIp>::new(name.clone());
-                if let Err(err) = session.test(localhost) {
-                    error!("Failed to test set {name:?}: {err}. Please create before running.");
-                    exit(-1);
-                }
-                session
-            }),
+                session.test(localhost).map_err(|err| {
+                    format!("Failed to test set {name:?}: {err}. Please create before running.")
+                })?;
+                Ok(session)
+            })?,
             ban_log_count_cache: Cache::builder()
                 .max_capacity(args.cache_max_size)
                 .time_to_live(Duration::from_secs(args.bl_ttl))
@@ -153,7 +152,7 @@ impl Leroy {
             ban_count_start: Instant::now(),
             ip_count_start: Instant::now(),
             args,
-        }
+        })
     }
 
     fn handle_line(&mut self, ip: Vec<u8>) {
@@ -211,7 +210,7 @@ impl Leroy {
     }
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     let args = Args::parse();
@@ -220,7 +219,7 @@ fn main() -> io::Result<()> {
     );
     info!("{:?}", args);
 
-    let mut leroy = Leroy::new(args);
+    let mut leroy = Leroy::new(args)?;
     for line in io::stdin().lock().split(b'\n') {
         leroy.handle_line(line?);
     }
