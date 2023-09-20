@@ -71,18 +71,59 @@ fn log_and_ignore_err<T, E: std::fmt::Debug>(prefix: &'static str, res: Result<T
     }
 }
 
-fn follow_banlog(args: &Args) -> io::Result<()> {
-    let mut ipv4 = Session::<HashIp>::new(args.ipset_ipv4_name.clone());
-    if let Err(err) = ipv4.test(IpAddr::V4(Ipv4Addr::LOCALHOST)) {
-        error!("failed to test ipv4 set: {err:?}. please create before running.");
-        exit(-1);
+#[derive(Debug, Copy, Clone)]
+enum IpFamily {
+    V4,
+    V6,
+}
+
+impl IpFamily {
+    fn from_ipv4(ipv4: bool) -> IpFamily {
+        if ipv4 {
+            IpFamily::V4
+        } else {
+            IpFamily::V6
+        }
+    }
+}
+
+struct ByIpFamily<T> {
+    ipv4: T,
+    ipv6: T,
+}
+
+impl<T> ByIpFamily<T> {
+    fn new_with<F>(mut init: F) -> ByIpFamily<T>
+    where
+        F: FnMut(IpFamily) -> T,
+    {
+        ByIpFamily {
+            ipv4: init(IpFamily::V4),
+            ipv6: init(IpFamily::V6),
+        }
     }
 
-    let mut ipv6 = Session::<HashIp>::new(args.ipset_ipv6_name.clone());
-    if let Err(err) = ipv6.test(IpAddr::V6(Ipv6Addr::LOCALHOST)) {
-        error!("failed to test ipv6 set: {err:?}. please create before running.");
-        exit(-1);
+    fn by_family_mut(&mut self, family: IpFamily) -> &mut T {
+        match family {
+            IpFamily::V4 => &mut self.ipv4,
+            IpFamily::V6 => &mut self.ipv6,
+        }
     }
+}
+
+fn follow_banlog(args: &Args) -> io::Result<()> {
+    let mut sessions = ByIpFamily::new_with(|family| {
+        let (name, localhost) = match family {
+            IpFamily::V4 => (&args.ipset_ipv4_name, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            IpFamily::V6 => (&args.ipset_ipv6_name, IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        };
+        let mut session = Session::<HashIp>::new(name.clone());
+        if let Err(err) = session.test(localhost) {
+            error!("failed to test set {name:?}: {err:?}. please create before running.");
+            exit(-1);
+        }
+        session
+    });
 
     let mut ban_log_count_cache: Cache<_, _, BuildHasherDefault<FxHasher>> = Cache::builder()
         .max_capacity(args.cache_max_size)
@@ -112,20 +153,12 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
             match ip_addr[..ip_addr.len() - 1].parse::<IpAddr>() {
                 Ok(ip) => {
                     ban_count += 1;
-                    match ip {
-                        IpAddr::V4(_) => {
-                            log_and_ignore_err(
-                                "Unable to add to ipv4 set",
-                                ipv4.add(ip, Some(time_to_ban(args, recidivism))),
-                            );
-                        }
-                        IpAddr::V6(_) => {
-                            log_and_ignore_err(
-                                "Unable to add to ipv6 set",
-                                ipv6.add(ip, Some(time_to_ban(args, recidivism))),
-                            );
-                        }
-                    };
+                    log_and_ignore_err(
+                        "Unable to add to set",
+                        sessions
+                            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+                            .add(ip, Some(time_to_ban(args, recidivism))),
+                    );
                     if ban_count_start.elapsed()
                         > Duration::from_secs(args.reporting_ban_time_period)
                     {
