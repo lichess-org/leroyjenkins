@@ -1,6 +1,8 @@
+#![feature(addr_parse_ascii)]
+
 use std::{
     hash::BuildHasherDefault,
-    io,
+    io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     process::exit,
     time::{Duration, Instant},
@@ -87,6 +89,7 @@ impl IpFamily {
     }
 }
 
+#[derive(Debug)]
 struct ByIpFamily<T> {
     ipv4: T,
     ipv6: T,
@@ -114,7 +117,7 @@ impl<T> ByIpFamily<T> {
 struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ban_log_count_cache: Cache<String, u32, BuildHasherDefault<FxHasher>>,
+    ban_log_count_cache: Cache<Vec<u8>, u32, BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     ban_count: u64,
@@ -157,14 +160,14 @@ impl Leroy {
         }
     }
 
-    fn handle_line(&mut self, ip_addr: String) {
+    fn handle_line(&mut self, ip: Vec<u8>) {
         self.ip_count += 1;
 
-        let ban_log_count: u32 = *self.ban_log_count_cache.get(&ip_addr).unwrap_or(&0) + 1;
+        let ban_log_count: u32 = *self.ban_log_count_cache.get(&ip).unwrap_or(&0) + 1;
         if ban_log_count >= self.args.bl_threshold {
-            self.ban(&ip_addr);
+            self.ban(&ip);
         }
-        self.ban_log_count_cache.insert(ip_addr, ban_log_count);
+        self.ban_log_count_cache.insert(ip, ban_log_count);
 
         if self.ip_count_start.elapsed() > Duration::from_secs(self.args.reporting_ip_time_period) {
             info!(
@@ -177,11 +180,11 @@ impl Leroy {
         }
     }
 
-    fn ban(&mut self, ip_addr: &str) {
-        let ip: IpAddr = match ip_addr.parse() {
+    fn ban(&mut self, ip: &[u8]) {
+        let ip: IpAddr = match IpAddr::parse_ascii(ip) {
             Ok(ip) => ip,
             Err(err) => {
-                error!("Error parsing IP from {ip_addr:?}: {err}");
+                error!("Error parsing IP from {ip:?}: {err}");
                 return;
             }
         };
@@ -221,7 +224,7 @@ fn main() -> io::Result<()> {
     info!("{:?}", args);
 
     let mut leroy = Leroy::new(args);
-    for line in io::stdin().lines() {
+    for line in io::stdin().lock().split(b'\n') {
         leroy.handle_line(line?);
     }
 
