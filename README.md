@@ -22,6 +22,14 @@ leroyjenkins reads data from stdin, and assumes each line is an IP address. Use 
 
 # Examples
 
+## Unix pipes
+Because it reads from stdin and this is unix, you can pipe stuff into it, use `tail -F`, use `awk`, use `grep` or `rg` or `ag`:
+
+## Dig some lines out of some application log and use them to ban:
+```sh
+tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --output=L awk '{print $NF}' | leroyjenkins $LEROY_ARGS
+```
+
 ## Ban Random IPs!
 Because it's unix, use bash and shuf to ban a random IP every second for an hour with:
 ```sh
