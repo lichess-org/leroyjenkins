@@ -79,13 +79,13 @@ fn follow_banlog(args: &Args) -> io::Result<()> {
     let mut ipv4 = Session::<HashIp>::new(args.ipset_ipv4_name.clone());
     if let Err(err) = ipv4.test(IpAddr::V4(Ipv4Addr::LOCALHOST)) {
         error!("failed to test ipv4 set: {err:?}. please create before running.");
-        //exit(-1);
+        exit(-1);
     }
 
     let mut ipv6 = Session::<HashIp>::new(args.ipset_ipv6_name.clone());
     if let Err(err) = ipv6.test(IpAddr::V6(Ipv6Addr::LOCALHOST)) {
         error!("failed to test ipv6 set: {err:?}. please create before running.");
-        //exit(-1);
+        exit(-1);
     }
 
     let mut ban_log_count_cache: Cache<_, _, BuildHasherDefault<FxHasher>> = Cache::builder()
