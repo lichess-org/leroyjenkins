@@ -49,7 +49,7 @@ fi
 
 export RUST_LOG=info
 tail -F /var/log/nginx/lichess.rate_limit.ip.log | leroyjenkins \
-  --bl-ttl=30 \
+  --bl-ttl=15 \
   --bl-threshold=10 \
   --ipset-base-time=$base_time \
   --ipset-ban-ttl=3600 \
