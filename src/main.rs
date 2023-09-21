@@ -196,6 +196,17 @@ impl Leroy {
                 return;
             }
         };
+        let ip_family = IpFamily::from_ipv4(ip.is_ipv4());
+
+        let already_banned = self
+            .sessions
+            .by_family_mut(ip_family)
+            .test(ip)
+            .map_err(|err| error!("Failed to test for ip: {ip} with error: {err}."))
+            .unwrap_or(false);
+        if already_banned {
+            return;
+        }
 
         self.ban_count += 1;
 
@@ -209,7 +220,7 @@ impl Leroy {
         if !self.args.dry_run {
             if let Err(err) = self
                 .sessions
-                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+                .by_family_mut(ip_family)
                 .add(ip, Some(timeout))
             {
                 error!("Unable to add {ip} to set: {err}");
