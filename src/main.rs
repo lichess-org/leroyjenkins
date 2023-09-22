@@ -7,7 +7,7 @@ use std::{
     hash::BuildHasherDefault,
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    num::{NonZeroU32, ParseIntError},
+    num::NonZeroU32,
     time::{Duration, Instant},
 };
 
@@ -29,24 +29,31 @@ struct Args {
     #[arg(long)]
     bl_threshold: u32,
 
-    /// The amount of time before the rate limiter is fully replenished. Uses humantime
-    /// to parse the duration. See: https://docs.rs/humantime/latest/humantime/ for details
+    /// The amount of time before the rate limiter is fully replenished.
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     ///
     /// Combines with `bl_threshold` to determine the exact rate limit
     /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
-    #[arg(long)]
-    bl_period: humantime::Duration,
+    #[arg(long, value_parser = parse_duration)]
+    bl_period: Duration,
 
     /// Recidivists get banned longer for their subsequent bans.
     /// This reperesents the amount of time we'll keep the history around.
     /// Everytime we :hammer-time: them, it will reset this countdown.
     /// The user must avoid an ipset ban for this long before their
     /// previous ipset bans are forgotten.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, value_parser = parse_duration)]
     ipset_ban_ttl: Duration,
 
     /// The time of the first ban. Each subsequent ban will be increased
     /// linearly by this amount (resulting in --ipset-base-time * ban count).
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, value_parser = parse_duration)]
     ipset_base_time: Duration,
 
@@ -60,11 +67,17 @@ struct Args {
 
     /// The number of seconds to accumulate ban counts before reporting and
     /// resetting.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ip_time_period: Duration,
 
@@ -92,20 +105,8 @@ impl Args {
     }
 }
 
-fn parse_duration(s: &str) -> Result<Duration, ParseIntError> {
-    let (s, factor) = if let Some(s) = s.strip_suffix('d') {
-        (s, 60 * 60 * 24)
-    } else if let Some(s) = s.strip_suffix('h') {
-        (s, 60 * 60)
-    } else if let Some(s) = s.strip_suffix('m') {
-        (s, 60)
-    } else {
-        (s.strip_suffix('s').unwrap_or(s), 1)
-    };
-
-    Ok(Duration::from_secs(
-        u64::from(s.trim().parse::<u32>()?) * factor,
-    ))
+fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
+    s.parse::<humantime::Duration>().map(|hd| hd.into())
 }
 
 struct Leroy {
