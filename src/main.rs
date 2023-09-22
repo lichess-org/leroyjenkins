@@ -1,5 +1,7 @@
 #![feature(addr_parse_ascii)]
 
+mod ip_family;
+
 use std::{
     error::Error,
     hash::BuildHasherDefault,
@@ -14,6 +16,8 @@ use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use rustc_hash::FxHasher;
+
+use crate::ip_family::{ByIpFamily, IpFamily};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -71,6 +75,15 @@ struct Args {
     dry_run: bool,
 }
 
+impl Args {
+    fn seconds_to_ban(&self, ban_count: u32) -> u32 {
+        self.ipset_base_time
+            .checked_mul(ban_count)
+            .and_then(|time| u32::try_from(time.as_secs()).ok())
+            .unwrap_or(u32::MAX)
+    }
+}
+
 fn parse_duration(s: &str) -> Result<Duration, ParseIntError> {
     let (s, factor) = if let Some(s) = s.strip_suffix('d') {
         (s, 60 * 60 * 24)
@@ -85,56 +98,6 @@ fn parse_duration(s: &str) -> Result<Duration, ParseIntError> {
     Ok(Duration::from_secs(
         u64::from(s.trim().parse::<u32>()?) * factor,
     ))
-}
-
-impl Args {
-    fn seconds_to_ban(&self, ban_count: u32) -> u32 {
-        self.ipset_base_time
-            .checked_mul(ban_count)
-            .and_then(|time| u32::try_from(time.as_secs()).ok())
-            .unwrap_or(u32::MAX)
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-enum IpFamily {
-    V4,
-    V6,
-}
-
-impl IpFamily {
-    fn from_ipv4(ipv4: bool) -> IpFamily {
-        if ipv4 {
-            IpFamily::V4
-        } else {
-            IpFamily::V6
-        }
-    }
-}
-
-#[derive(Debug)]
-struct ByIpFamily<T> {
-    ipv4: T,
-    ipv6: T,
-}
-
-impl<T> ByIpFamily<T> {
-    fn try_new_with<F, E>(mut init: F) -> Result<ByIpFamily<T>, E>
-    where
-        F: FnMut(IpFamily) -> Result<T, E>,
-    {
-        Ok(ByIpFamily {
-            ipv4: init(IpFamily::V4)?,
-            ipv6: init(IpFamily::V6)?,
-        })
-    }
-
-    fn by_family_mut(&mut self, family: IpFamily) -> &mut T {
-        match family {
-            IpFamily::V4 => &mut self.ipv4,
-            IpFamily::V6 => &mut self.ipv6,
-        }
-    }
 }
 
 struct Leroy {
