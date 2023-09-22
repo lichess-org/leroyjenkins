@@ -18,52 +18,55 @@ use rustc_hash::FxHasher;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// The time we'll keep the ban_log buckets around.
-    /// the user must avoid an nginx ban for this long before their
+    /// The time we'll keep the nginx log buckets around.
+    /// The user must avoid an nginx log for this long before their
     /// previous nginx bans are forgotten. Note, the first ban should probably
-    /// be long enough that this will expire during its duration
+    /// be long enough that this will expire during its duration.
     #[arg(long, value_parser = parse_duration)]
     bl_ttl: Duration,
 
-    /// The number of times they can show up in the ban log before hammer-time
+    /// The number of times they can show up in the ban log before hammer-time.
     #[arg(long)]
     bl_threshold: u32,
 
-    /// Recidivists get banned for longer for their subsequent bans,
-    /// this reperesents the amount of time we'll keep this history around.
-    /// Everytime we :hammer-time: them, it will reset this countdown
-    /// the user must avoid an ipset ban for this long before their
+    /// Recidivists get banned longer for their subsequent bans.
+    /// This reperesents the amount of time we'll keep the history around.
+    /// Everytime we :hammer-time: them, it will reset this countdown.
+    /// The user must avoid an ipset ban for this long before their
     /// previous ipset bans are forgotten.
     #[arg(long, value_parser = parse_duration)]
     ipset_ban_ttl: Duration,
 
-    /// (In seconds): The time of the first ban. Each subsequent ban will be increased
-    /// linearly by this amount (ban_count * base_time)
+    /// The time of the first ban. Each subsequent ban will be increased
+    /// linearly by this amount (resulting in --ipset-base-time * ban count).
     #[arg(long, value_parser = parse_duration)]
     ipset_base_time: Duration,
 
-    /// The name of the ipset for ipv4
+    /// The name of the ipset for IPv4.
     #[arg(long)]
     ipset_ipv4_name: String,
 
-    /// The name of the ipset for ipv6
+    /// The name of the ipset for IPv6.
     #[arg(long)]
     ipset_ipv6_name: String,
 
-    /// The number of seconds to accumulate ban counts before reporting and resetting.
+    /// The number of seconds to accumulate ban counts before reporting and
+    /// resetting.
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ban_time_period: Duration,
 
-    /// The number of seconds to accumulate ip counts before reporting and resetting.
+    /// The number of seconds to accumulate ip counts before reporting and
+    /// resetting.
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ip_time_period: Duration,
 
-    /// The number of elements to keep in the cache that we use, larger is more memory
-    /// smaller is probably slightly faster, but maybe not.
+    /// The number of elements to keep in the cache that we use, larger is more
+    /// memory smaller is probably slightly faster, but maybe not.
     #[arg(long, default_value = "500000")]
     cache_max_size: u64,
 
-    /// Do not actually actually test or manage ipsets.
+    /// Do not actually actually test or manage ipsets. Useful for test runs
+    /// without privileges.
     #[arg(long)]
     dry_run: bool,
 }
