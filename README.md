@@ -22,11 +22,11 @@ rustup toolchain install nightly
 tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-ttl=20 --bl-threshold=100 --ipset-base-time=100 --ipset-ban-ttl=86400 --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4 --reporting-ip-time-period=1 --reporting-ban-time-period=1
 ```
 
-[!WARNING]
-*leroyjenkins* itself does nothing wrt. to your iptables rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
+> [!WARNING]
+> *leroyjenkins* itself does nothing wrt. to your iptables rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
 
-[!NOTE]
-Must be run with enough privileges to actually add to ipsets. :joy:
+> [!NOTE]
+> Must be run with enough privileges to actually add to ipsets. :joy:
 
 ## Examples
 
