@@ -5,6 +5,7 @@ use std::{
     hash::BuildHasherDefault,
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    num::ParseIntError,
     time::{Duration, Instant},
 };
 
@@ -21,8 +22,8 @@ struct Args {
     /// the user must avoid an nginx ban for this long before their
     /// previous nginx bans are forgotten. Note, the first ban should probably
     /// be long enough that this will expire during its duration
-    #[arg(long)]
-    bl_ttl: u64,
+    #[arg(long, value_parser = parse_duration)]
+    bl_ttl: Duration,
 
     /// The number of times they can show up in the ban log before hammer-time
     #[arg(long)]
@@ -33,13 +34,13 @@ struct Args {
     /// Everytime we :hammer-time: them, it will reset this countdown
     /// the user must avoid an ipset ban for this long before their
     /// previous ipset bans are forgotten.
-    #[arg(long)]
-    ipset_ban_ttl: u64,
+    #[arg(long, value_parser = parse_duration)]
+    ipset_ban_ttl: Duration,
 
     /// (In seconds): The time of the first ban. Each subsequent ban will be increased
     /// linearly by this amount (ban_count * base_time)
-    #[arg(long)]
-    ipset_base_time: u32,
+    #[arg(long, value_parser = parse_duration)]
+    ipset_base_time: Duration,
 
     /// The name of the ipset for ipv4
     #[arg(long)]
@@ -50,12 +51,12 @@ struct Args {
     ipset_ipv6_name: String,
 
     /// The number of seconds to accumulate ban counts before reporting and resetting.
-    #[arg(long, default_value = "10")]
-    reporting_ban_time_period: u64,
+    #[arg(long, default_value = "10s", value_parser = parse_duration)]
+    reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and resetting.
-    #[arg(long, default_value = "10")]
-    reporting_ip_time_period: u64,
+    #[arg(long, default_value = "10s", value_parser = parse_duration)]
+    reporting_ip_time_period: Duration,
 
     /// The number of elements to keep in the cache that we use, larger is more memory
     /// smaller is probably slightly faster, but maybe not.
@@ -67,9 +68,28 @@ struct Args {
     dry_run: bool,
 }
 
+fn parse_duration(s: &str) -> Result<Duration, ParseIntError> {
+    let (s, factor) = if let Some(s) = s.strip_suffix('d') {
+        (s, 60 * 60 * 24)
+    } else if let Some(s) = s.strip_suffix('h') {
+        (s, 60 * 60)
+    } else if let Some(s) = s.strip_suffix('m') {
+        (s, 60)
+    } else {
+        (s.strip_suffix('s').unwrap_or(s), 1)
+    };
+
+    Ok(Duration::from_secs(
+        u64::from(s.trim().parse::<u32>()?) * factor,
+    ))
+}
+
 impl Args {
     fn seconds_to_ban(&self, ban_count: u32) -> u32 {
-        self.ipset_base_time * ban_count
+        self.ipset_base_time
+            .checked_mul(ban_count)
+            .and_then(|time| u32::try_from(time.as_secs()).ok())
+            .unwrap_or(u32::MAX)
     }
 }
 
@@ -148,12 +168,12 @@ impl Leroy {
             ban_log_count_cache: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(Duration::from_secs(args.bl_ttl))
+                .time_to_live(args.bl_ttl)
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(Duration::from_secs(args.ipset_ban_ttl))
+                .time_to_live(args.ipset_ban_ttl)
                 .build_with_hasher(Default::default()),
             ban_count: 0,
             ip_count: 0,
@@ -172,7 +192,7 @@ impl Leroy {
         }
         self.ban_log_count_cache.insert(ip, ban_log_count);
 
-        if self.ip_count_start.elapsed() > Duration::from_secs(self.args.reporting_ip_time_period) {
+        if self.ip_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
                 "Seen {} ips since {:?}",
                 self.ip_count,
@@ -217,8 +237,7 @@ impl Leroy {
             Err(err) => error!("Unable to add {ip} to set: {err}"),
         }
 
-        if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
-        {
+        if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
             info!(
                 "Banned {} ips in the past {:?}",
                 self.ban_count,
