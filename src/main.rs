@@ -195,34 +195,26 @@ impl Leroy {
                 return;
             }
         };
-        let ip_family = IpFamily::from_ipv4(ip.is_ipv4());
-
-        let already_banned = self
-            .sessions
-            .by_family_mut(ip_family)
-            .test(ip)
-            .map_err(|err| error!("Failed to test for ip: {ip} with error: {err}."))
-            .unwrap_or(false);
-        if already_banned {
-            return;
-        }
-
-        self.ban_count += 1;
 
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
-        self.recidivism_counts.insert(ip, recidivism);
-
         let timeout = self.args.seconds_to_ban(recidivism);
-        debug!("Banning {ip} for {timeout}s (recidivism: {recidivism})");
 
-        if !self.args.dry_run {
-            if let Err(err) = self
-                .sessions
-                .by_family_mut(ip_family)
+        let ban_result = if self.args.dry_run {
+            Ok(true)
+        } else {
+            self.sessions
+                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
                 .add(ip, Some(timeout))
-            {
-                error!("Unable to add {ip} to set: {err}");
+        };
+
+        match ban_result {
+            Ok(false) => debug!("{ip} already banned"),
+            Ok(true) => {
+                debug!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
+                self.ban_count += 1;
+                self.recidivism_counts.insert(ip, recidivism);
             }
+            Err(err) => error!("Unable to add {ip} to set: {err}"),
         }
 
         if self.ban_count_start.elapsed() > Duration::from_secs(self.args.reporting_ban_time_period)
