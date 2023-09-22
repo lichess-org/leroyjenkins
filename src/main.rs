@@ -136,11 +136,10 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            // TODO: rethink the 2 * args.bl_period time_to_live value. 2 times the duration
-            //       is probably fine, but it can probably be tighter?
             ip_rate_limiters: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
+                // TODO: is 2s + the bl_period enough time? I think so.
                 .time_to_live(Duration::from_secs(2) + args.bl_period)
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
