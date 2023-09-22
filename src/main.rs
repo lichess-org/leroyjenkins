@@ -27,7 +27,7 @@ struct Args {
     /// `bl_period` to determine the exact rate limit.
     /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long)]
-    bl_threshold: u32,
+    bl_threshold: NonZeroU32,
 
     /// The amount of time before the rate limiter is fully replenished.
     /// Uses humantime to parse the duration.
@@ -99,10 +99,6 @@ impl Args {
             .and_then(|time| u32::try_from(time.as_secs()).ok())
             .unwrap_or(u32::MAX)
     }
-
-    fn std_duration(&self) -> std::time::Duration {
-        self.bl_period.into()
-    }
 }
 
 fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
@@ -145,7 +141,7 @@ impl Leroy {
             ip_rate_limiters: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(2 * args.std_duration())
+                .time_to_live(Duration::from_secs(2) + args.bl_period)
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
@@ -167,12 +163,9 @@ impl Leroy {
             self.ip_rate_limiters.insert(
                 line.clone(),
                 RateLimiter::direct(
-                    Quota::with_period(self.args.std_duration())
+                    Quota::with_period(self.args.bl_period)
                         .expect("Rate limits MUST Be non-zero")
-                        .allow_burst(
-                            NonZeroU32::new(self.args.bl_threshold)
-                                .expect("bl-thresholds must be non-zero"),
-                        ),
+                        .allow_burst(self.args.bl_threshold),
                 ),
             );
         }
