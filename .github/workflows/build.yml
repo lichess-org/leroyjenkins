@@ -6,9 +6,13 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - run: sudo apt-get update && sudo apt-get install -y libipset-dev
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo build
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v3
+        with:
+          name: leroyjenkins
+          path: target/release/leroyjenkins
