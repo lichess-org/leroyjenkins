@@ -140,11 +140,11 @@ struct Leroy {
     ban_log_count_cache: Cache<Vec<u8>, u32, BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
-    ban_count: u64,
-    ip_count: u64,
+    line_count: u64,
+    line_count_start: Instant,
 
+    ban_count: u64,
     ban_count_start: Instant,
-    ip_count_start: Instant,
 
     args: Args,
 }
@@ -175,47 +175,42 @@ impl Leroy {
                 .max_capacity(args.cache_max_size)
                 .time_to_live(args.ipset_ban_ttl)
                 .build_with_hasher(Default::default()),
+            line_count: 0,
             ban_count: 0,
-            ip_count: 0,
+            line_count_start: Instant::now(),
             ban_count_start: Instant::now(),
-            ip_count_start: Instant::now(),
             args,
         })
     }
 
-    fn handle_line(&mut self, ip: Vec<u8>) {
-        self.ip_count += 1;
+    fn handle_line(&mut self, line: Vec<u8>) {
+        self.line_count += 1;
 
-        let ban_log_count: u32 = *self.ban_log_count_cache.get(&ip).unwrap_or(&0) + 1;
+        let ban_log_count: u32 = *self.ban_log_count_cache.get(&line).unwrap_or(&0) + 1;
         if ban_log_count >= self.args.bl_threshold {
-            self.ban(&ip);
+            match IpAddr::parse_ascii(&line) {
+                Ok(ip) => self.ban(ip),
+                Err(err) => error!(
+                    "Error parsing IP from {:?}: {}",
+                    String::from_utf8_lossy(&line),
+                    err
+                ),
+            }
         }
-        self.ban_log_count_cache.insert(ip, ban_log_count);
+        self.ban_log_count_cache.insert(line, ban_log_count);
 
-        if self.ip_count_start.elapsed() > self.args.reporting_ip_time_period {
+        if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
-                "Seen {} ips since {:?}",
-                self.ip_count,
-                self.ip_count_start.elapsed()
+                "Seen {} lines since {:?}",
+                self.line_count,
+                self.line_count_start.elapsed()
             );
-            self.ip_count = 0;
-            self.ip_count_start = Instant::now();
+            self.line_count = 0;
+            self.line_count_start = Instant::now();
         }
     }
 
-    fn ban(&mut self, ip: &[u8]) {
-        let ip: IpAddr = match IpAddr::parse_ascii(ip) {
-            Ok(ip) => ip,
-            Err(err) => {
-                error!(
-                    "Error parsing IP from {:?}: {}",
-                    String::from_utf8_lossy(ip),
-                    err
-                );
-                return;
-            }
-        };
-
+    fn ban(&mut self, ip: IpAddr) {
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         let timeout = self.args.seconds_to_ban(recidivism);
 
