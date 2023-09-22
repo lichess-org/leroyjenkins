@@ -2,6 +2,7 @@
 name = "leroyjenkins"
 version = "0.1.0"
 publish = false
+description = "Follow ban logs to manage ipsets"
 repository = "https://github.com/lichess-org/leroyjenkins"
 readme = "README.md"
 license = "GPL-3.0+"
