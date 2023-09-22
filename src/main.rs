@@ -1,7 +1,6 @@
 #![feature(addr_parse_ascii)]
 
 use std::{
-    cmp::max,
     error::Error,
     hash::BuildHasherDefault,
     io::{self, BufRead},
@@ -169,7 +168,7 @@ impl Leroy {
 
         let ban_log_count: u32 = *self.ban_log_count_cache.get(&ip).unwrap_or(&0) + 1;
         if ban_log_count >= self.args.bl_threshold {
-            self.ban(&ip, ban_log_count == max(self.args.bl_threshold, 1));
+            self.ban(&ip);
         }
         self.ban_log_count_cache.insert(ip, ban_log_count);
 
@@ -184,7 +183,7 @@ impl Leroy {
         }
     }
 
-    fn ban(&mut self, ip: &[u8], recidivist: bool) {
+    fn ban(&mut self, ip: &[u8]) {
         let ip: IpAddr = match IpAddr::parse_ascii(ip) {
             Ok(ip) => ip,
             Err(err) => {
@@ -210,8 +209,7 @@ impl Leroy {
 
         self.ban_count += 1;
 
-        let recidivism: u32 =
-            *self.recidivism_counts.get(&ip).unwrap_or(&0) + u32::from(recidivist);
+        let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         self.recidivism_counts.insert(ip, recidivism);
 
         let timeout = self.args.seconds_to_ban(recidivism);
