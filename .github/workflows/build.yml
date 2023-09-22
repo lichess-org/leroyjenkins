@@ -10,5 +10,5 @@ jobs:
     steps:
       - run: sudo apt-get update && sudo apt-get install -y libipset-dev
       - uses: actions/checkout@v3
-      - use: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly
       - run: cargo build
