@@ -4,7 +4,7 @@ mod ip_family;
 
 use std::{
     error::Error,
-    hash::BuildHasherDefault,
+    hash::{BuildHasherDefault, Hash},
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
@@ -12,7 +12,11 @@ use std::{
 };
 
 use clap::Parser;
-use governor::{clock::QuantaInstant, DefaultDirectRateLimiter, NotUntil, Quota, RateLimiter};
+use governor::{
+    clock::{DefaultClock, QuantaInstant},
+    state::keyed::HashMapStateStore,
+    NotUntil, Quota, RateLimiter,
+};
 use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
@@ -108,8 +112,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    quota: Quota,
-    ip_rate_limiters: Cache<Vec<u8>, DefaultDirectRateLimiter, BuildHasherDefault<FxHasher>>,
+    ip_rate_limiters: KeyedRateLimiter<Vec<u8>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -119,6 +122,37 @@ struct Leroy {
     ban_count_start: Instant,
 
     args: Args,
+}
+
+struct KeyedRateLimiter<K>
+where
+    K: Hash + Eq + Clone,
+{
+    rate_limiter: RateLimiter<K, HashMapStateStore<K>, DefaultClock>,
+    next_gc_len: usize,
+}
+
+impl<K> KeyedRateLimiter<K>
+where
+    K: Hash + Eq + Clone,
+{
+    fn new(quota: Quota) -> KeyedRateLimiter<K> {
+        KeyedRateLimiter {
+            rate_limiter: RateLimiter::hashmap(quota),
+            next_gc_len: 1,
+        }
+    }
+
+    fn maybe_gc(&mut self) {
+        if self.rate_limiter.len() >= self.next_gc_len {
+            self.rate_limiter.retain_recent();
+            self.next_gc_len = self.rate_limiter.len() * 2;
+        }
+    }
+
+    fn check_key(&mut self, key: &K) -> Result<(), NotUntil<QuantaInstant>> {
+        self.rate_limiter.check_key(key)
+    }
 }
 
 impl Leroy {
@@ -137,15 +171,11 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            quota: Quota::with_period(args.bl_period)
-                .expect("Rate limits MUST Be non-zero")
-                .allow_burst(args.bl_threshold),
-            ip_rate_limiters: Cache::builder()
-                .initial_capacity(args.cache_max_size as usize / 5)
-                .max_capacity(args.cache_max_size)
-                // TODO: is 2s + the bl_period enough time? I think so.
-                .time_to_live(Duration::from_secs(2) + args.bl_period)
-                .build_with_hasher(Default::default()),
+            ip_rate_limiters: KeyedRateLimiter::new(
+                Quota::with_period(args.bl_period)
+                    .expect("Rate limits MUST be non-zero")
+                    .allow_burst(args.bl_threshold),
+            ),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
@@ -162,17 +192,18 @@ impl Leroy {
     fn handle_line(&mut self, line: Vec<u8>) {
         self.line_count += 1;
 
-        match self.ip_rate_limiters.get(&line) {
-            Some(rate_limiter) => {
-                let check_result = rate_limiter.check();
-                self.handle_check_result(&line, check_result);
+        if self.ip_rate_limiters.check_key(&line).is_err() {
+            match IpAddr::parse_ascii(&line) {
+                Ok(ip) => self.ban(ip),
+                Err(err) => error!(
+                    "Error parsing IP from {:?}: {}",
+                    String::from_utf8_lossy(&line),
+                    err
+                ),
             }
-            None => {
-                let rate_limiter = RateLimiter::direct(self.quota);
-                self.handle_check_result(&line, rate_limiter.check());
-                self.ip_rate_limiters.insert(line, rate_limiter);
-            }
-        };
+        }
+
+        self.ip_rate_limiters.maybe_gc();
 
         if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
@@ -182,23 +213,6 @@ impl Leroy {
             );
             self.line_count = 0;
             self.line_count_start = Instant::now();
-        }
-    }
-
-    fn handle_check_result(
-        &mut self,
-        line: &[u8],
-        check_result: Result<(), NotUntil<QuantaInstant>>,
-    ) {
-        if check_result.is_err() {
-            match IpAddr::parse_ascii(&line) {
-                Ok(ip) => self.ban(ip),
-                Err(err) => error!(
-                    "Error parsing IP from {:?}: {}",
-                    String::from_utf8_lossy(&line),
-                    err
-                ),
-            }
         }
     }
 
