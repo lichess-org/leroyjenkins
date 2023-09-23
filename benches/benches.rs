@@ -60,6 +60,20 @@ fn dry_run(c: &mut Criterion) {
             bits += 3733;
         })
     });
+
+    group.throughput(Throughput::Elements(3 * 20));
+    group.bench_function("hammer_many_ips", |b| {
+        let mut leroy = make_leroy();
+        let mut bits = 0;
+        b.iter(|| {
+            for _ in 0..20 {
+                leroy.handle_line(Ipv4Addr::from(bits).to_string().into());
+                leroy.handle_line(Ipv4Addr::from(!bits).to_string().into());
+                leroy.handle_line(Ipv4Addr::from(bits.swap_bytes()).to_string().into());
+            }
+            bits += 3733;
+        })
+    });
 }
 
 criterion_group!(benches, dry_run);
