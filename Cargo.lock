@@ -601,7 +601,6 @@ dependencies = [
  "ipset",
  "log",
  "mini-moka",
- "parking_lot",
  "pretty_env_logger",
  "rustc-hash",
 ]

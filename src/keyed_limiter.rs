@@ -2,9 +2,7 @@ use std::{
     cell::{Cell, RefCell},
     cmp::max,
     hash::Hash,
-    marker::PhantomData,
     num::NonZeroU64,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use governor::{
@@ -17,29 +15,28 @@ use log::debug;
 use rustc_hash::FxHashMap;
 
 #[derive(Default)]
-struct RelaxedInMemoryState {
-    value: AtomicU64,
-    not_sync: PhantomData<Cell<u32>>, // Correct in single threaded use only
+struct UnsyncInMemoryState {
+    value: Cell<u64>,
 }
 
-impl RelaxedInMemoryState {
+impl UnsyncInMemoryState {
     fn measure_and_replace_one<T, F, E>(&self, mut f: F) -> Result<T, E>
     where
         F: FnMut(Option<Nanos>) -> Result<(T, Nanos), E>,
     {
-        let prev = self.value.load(Ordering::Relaxed);
+        let prev = self.value.get();
         let (payload, next) = f(NonZeroU64::new(prev).map(|n| n.get().into()))?;
-        self.value.store(next.into(), Ordering::Relaxed);
+        self.value.set(next.into());
         Ok(payload)
     }
 
     fn is_older_than(&self, nanos: Nanos) -> bool {
-        self.value.load(Ordering::Relaxed) <= nanos.into()
+        self.value.get() <= nanos.into()
     }
 }
 
 struct FxHashMapStateStore<K> {
-    buckets: RefCell<FxHashMap<K, RelaxedInMemoryState>>,
+    buckets: RefCell<FxHashMap<K, UnsyncInMemoryState>>,
 }
 
 impl<K> FxHashMapStateStore<K>
@@ -61,6 +58,7 @@ where
     K: Hash + Eq + Clone,
 {
     type Key = K;
+
     fn measure_and_replace<T, F, E>(&self, key: &K, f: F) -> Result<T, E>
     where
         F: Fn(Option<Nanos>) -> Result<(T, Nanos), E>,
@@ -69,9 +67,7 @@ where
         if let Some(v) = buckets.get(key) {
             return v.measure_and_replace_one(f);
         }
-        let entry = buckets
-            .entry(key.clone())
-            .or_insert_with(RelaxedInMemoryState::default);
+        let entry = buckets.entry(key.clone()).or_default();
         entry.measure_and_replace_one(f)
     }
 }
