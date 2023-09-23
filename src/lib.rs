@@ -4,6 +4,7 @@ mod ip_family;
 
 use std::{
     cmp::max,
+    hash::BuildHasherDefault,
     collections::HashMap,
     error::Error,
     hash::Hash,
@@ -22,6 +23,7 @@ use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use parking_lot::Mutex;
+use rustc_hash::FxHasher;
 
 use crate::ip_family::{ByIpFamily, IpFamily};
 
@@ -119,7 +121,7 @@ pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
     ip_rate_limiters: KeyedRateLimiter<Vec<u8>>,
-    recidivism_counts: Cache<IpAddr, u32>,
+    recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
     line_count_start: Instant,
