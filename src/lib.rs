@@ -4,10 +4,12 @@ mod ip_family;
 mod keyed_limiter;
 
 use std::{
+    cell::Cell,
     error::Error,
     hash::BuildHasherDefault,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -117,7 +119,7 @@ pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
     ip_rate_limiters: KeyedLimiter<Vec<u8>>,
-    recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
+    recidivism_counts: Cache<IpAddr, Rc<Cell<u32>>, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
     line_count_start: Instant,
@@ -153,7 +155,7 @@ impl Leroy {
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.ipset_ban_ttl)
+                .time_to_idle(args.ipset_ban_ttl)
                 .build_with_hasher(Default::default()),
             line_count: 0,
             ban_count: 0,
@@ -191,7 +193,13 @@ impl Leroy {
     }
 
     fn ban(&mut self, ip: IpAddr) {
-        let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
+        let recidivism_cell: Rc<Cell<u32>> =
+            self.recidivism_counts.get(&ip).cloned().unwrap_or_else(|| {
+                let new_cell = Rc::new(Cell::new(0));
+                self.recidivism_counts.insert(ip, new_cell.clone());
+                new_cell
+            });
+        let recidivism = recidivism_cell.get() + 1;
         let timeout = self.args.seconds_to_ban(recidivism);
 
         let ban_result = if self.args.dry_run {
@@ -207,7 +215,7 @@ impl Leroy {
             Ok(true) => {
                 debug!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
                 self.ban_count += 1;
-                self.recidivism_counts.insert(ip, recidivism);
+                recidivism_cell.set(recidivism);
             }
             Err(err) => error!("Unable to add {ip} to set: {err}"),
         }
