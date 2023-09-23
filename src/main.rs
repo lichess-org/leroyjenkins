@@ -145,8 +145,13 @@ where
 
     fn maybe_gc(&mut self) {
         if self.rate_limiter.len() >= self.next_gc_len {
+            let old_len = self.rate_limiter.len();
             self.rate_limiter.retain_recent();
-            self.next_gc_len = self.rate_limiter.len() * 2;
+            let new_len = self.rate_limiter.len();
+
+            debug!("Garbage collected rate limiter table: {old_len} -> {new_len} entries");
+
+            self.next_gc_len = new_len * 2;
         }
     }
 
