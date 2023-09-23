@@ -108,6 +108,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
+    quota: Quota,
     ip_rate_limiters: Cache<Vec<u8>, DefaultDirectRateLimiter, BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
@@ -136,6 +137,9 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
+            quota: Quota::with_period(args.bl_period)
+                .expect("Rate limits MUST Be non-zero")
+                .allow_burst(args.bl_threshold),
             ip_rate_limiters: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
@@ -164,11 +168,7 @@ impl Leroy {
                 self.handle_check_result(&line, check_result);
             }
             None => {
-                let rate_limiter = RateLimiter::direct(
-                    Quota::with_period(self.args.bl_period)
-                        .expect("Rate limits MUST Be non-zero")
-                        .allow_burst(self.args.bl_threshold),
-                );
+                let rate_limiter = RateLimiter::direct(self.quota);
                 self.handle_check_result(&line, rate_limiter.check());
                 self.ip_rate_limiters.insert(line, rate_limiter);
             }
