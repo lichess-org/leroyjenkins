@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, time::Duration};
+use std::{net::Ipv4Addr, num::NonZeroU32, time::Duration};
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use leroyjenkins::{Args, Leroy};
@@ -48,6 +48,16 @@ fn dry_run(c: &mut Criterion) {
             leroy.handle_line(b"152.228.187.173".to_vec());
             leroy.handle_line(b"54.38.164.114".to_vec());
             leroy.handle_line(b"54.38.164.114".to_vec());
+        })
+    });
+
+    group.throughput(Throughput::Elements(1));
+    group.bench_function("unique_ips", |b| {
+        let mut leroy = make_leroy();
+        let mut bits = 0;
+        b.iter(|| {
+            leroy.handle_line(Ipv4Addr::from(bits).to_string().into());
+            bits += 3733;
         })
     });
 }
