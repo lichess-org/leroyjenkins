@@ -8,6 +8,9 @@ readme = "README.md"
 license = "GPL-3.0+"
 edition = "2021"
 
+[lib]
+bench = false # Use criterion harness
+
 [profile.release]
 strip = true
 
@@ -23,6 +26,10 @@ parking_lot = "0.12.1"
 
 [dev-dependencies]
 criterion = "0.5.1"
+
+[[bin]]
+name = "leroyjenkins"
+bench = false # Use criterion harness
 
 [[bench]]
 name = "benches"
