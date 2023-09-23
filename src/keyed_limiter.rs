@@ -1,16 +1,45 @@
-use std::{cell::RefCell, cmp::max, hash::Hash};
+use std::{
+    cell::{Cell, RefCell},
+    cmp::max,
+    hash::Hash,
+    marker::PhantomData,
+    num::NonZeroU64,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use governor::{
     clock::{DefaultClock, QuantaInstant},
     nanos::Nanos,
-    state::{keyed::ShrinkableKeyedStateStore, InMemoryState, NotKeyed, StateStore},
+    state::{keyed::ShrinkableKeyedStateStore, StateStore},
     NotUntil, Quota, RateLimiter,
 };
 use log::debug;
 use rustc_hash::FxHashMap;
 
+#[derive(Default)]
+struct RelaxedInMemoryState {
+    value: AtomicU64,
+    not_sync: PhantomData<Cell<u32>>, // Correct in single threaded use only
+}
+
+impl RelaxedInMemoryState {
+    fn measure_and_replace_one<T, F, E>(&self, mut f: F) -> Result<T, E>
+    where
+        F: FnMut(Option<Nanos>) -> Result<(T, Nanos), E>,
+    {
+        let prev = self.value.load(Ordering::Relaxed);
+        let (payload, next) = f(NonZeroU64::new(prev).map(|n| n.get().into()))?;
+        self.value.store(next.into(), Ordering::Relaxed);
+        Ok(payload)
+    }
+
+    fn is_older_than(&self, nanos: Nanos) -> bool {
+        self.value.load(Ordering::Relaxed) <= nanos.into()
+    }
+}
+
 struct FxHashMapStateStore<K> {
-    buckets: RefCell<FxHashMap<K, InMemoryState>>,
+    buckets: RefCell<FxHashMap<K, RelaxedInMemoryState>>,
 }
 
 impl<K> FxHashMapStateStore<K>
@@ -38,12 +67,12 @@ where
     {
         let mut buckets = self.buckets.borrow_mut();
         if let Some(v) = buckets.get(key) {
-            return v.measure_and_replace(&NotKeyed::NonKey, f);
+            return v.measure_and_replace_one(f);
         }
         let entry = buckets
             .entry(key.clone())
-            .or_insert_with(InMemoryState::default);
-        entry.measure_and_replace(&NotKeyed::NonKey, f)
+            .or_insert_with(RelaxedInMemoryState::default);
+        entry.measure_and_replace_one(f)
     }
 }
 
@@ -52,7 +81,9 @@ where
     K: Hash + Eq + Clone,
 {
     fn retain_recent(&self, drop_below: Nanos) {
-        //self.buckets.borrow_mut().retain(|_, v| !v.is_older_than(drop_below));
+        self.buckets
+            .borrow_mut()
+            .retain(|_, v| !v.is_older_than(drop_below));
     }
 
     fn shrink_to_fit(&self) {
