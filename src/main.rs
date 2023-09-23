@@ -12,7 +12,7 @@ use std::{
 };
 
 use clap::Parser;
-use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
+use governor::{clock::QuantaInstant, DefaultDirectRateLimiter, NotUntil, Quota, RateLimiter};
 use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
@@ -158,31 +158,21 @@ impl Leroy {
     fn handle_line(&mut self, line: Vec<u8>) {
         self.line_count += 1;
 
-        if !self.ip_rate_limiters.contains_key(&line) {
-            self.ip_rate_limiters.insert(
-                line.clone(),
-                RateLimiter::direct(
+        match self.ip_rate_limiters.get(&line) {
+            Some(rate_limiter) => {
+                let check_result = rate_limiter.check();
+                self.handle_check_result(&line, check_result);
+            }
+            None => {
+                let rate_limiter = RateLimiter::direct(
                     Quota::with_period(self.args.bl_period)
                         .expect("Rate limits MUST Be non-zero")
                         .allow_burst(self.args.bl_threshold),
-                ),
-            );
-        }
-
-        let rate_limiter = self
-            .ip_rate_limiters
-            .get(&line)
-            .expect("This should never fail :kappa:");
-        if rate_limiter.check().is_err() {
-            match IpAddr::parse_ascii(&line) {
-                Ok(ip) => self.ban(ip),
-                Err(err) => error!(
-                    "Error parsing IP from {:?}: {}",
-                    String::from_utf8_lossy(&line),
-                    err
-                ),
+                );
+                self.handle_check_result(&line, rate_limiter.check());
+                self.ip_rate_limiters.insert(line, rate_limiter);
             }
-        }
+        };
 
         if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
@@ -192,6 +182,23 @@ impl Leroy {
             );
             self.line_count = 0;
             self.line_count_start = Instant::now();
+        }
+    }
+
+    fn handle_check_result(
+        &mut self,
+        line: &[u8],
+        check_result: Result<(), NotUntil<QuantaInstant>>,
+    ) {
+        if check_result.is_err() {
+            match IpAddr::parse_ascii(&line) {
+                Ok(ip) => self.ban(ip),
+                Err(err) => error!(
+                    "Error parsing IP from {:?}: {}",
+                    String::from_utf8_lossy(&line),
+                    err
+                ),
+            }
         }
     }
 
