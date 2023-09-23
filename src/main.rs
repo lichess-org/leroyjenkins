@@ -3,8 +3,10 @@
 mod ip_family;
 
 use std::{
+    cmp::max,
+    collections::HashMap,
     error::Error,
-    hash::{BuildHasherDefault, Hash},
+    hash::Hash,
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
@@ -20,7 +22,7 @@ use governor::{
 use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
-use rustc_hash::FxHasher;
+use parking_lot::Mutex;
 
 use crate::ip_family::{ByIpFamily, IpFamily};
 
@@ -85,8 +87,13 @@ struct Args {
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ip_time_period: Duration,
 
-    /// The number of elements to keep in the cache that we use, larger is more
-    /// memory smaller is probably slightly faster, but maybe not.
+    /// Initial capacity of the rate limiter table and recidivism cache.
+    /// Choose a value large enough for a typical DDOS, to avoid gc and memory
+    /// allocation when under attack.
+    #[arg(long, default_value = "100000")]
+    cache_initial_capacity: usize,
+
+    /// The maximum number of entries to keep in the recidivism cache.
     #[arg(long, default_value = "500000")]
     cache_max_size: u64,
 
@@ -113,7 +120,7 @@ struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
     ip_rate_limiters: KeyedRateLimiter<Vec<u8>>,
-    recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
+    recidivism_counts: Cache<IpAddr, u32>,
 
     line_count: u64,
     line_count_start: Instant,
@@ -129,6 +136,7 @@ where
     K: Hash + Eq + Clone,
 {
     rate_limiter: RateLimiter<K, HashMapStateStore<K>, DefaultClock>,
+    initial_capacity: usize,
     next_gc_len: usize,
 }
 
@@ -136,10 +144,15 @@ impl<K> KeyedRateLimiter<K>
 where
     K: Hash + Eq + Clone,
 {
-    fn new(quota: Quota) -> KeyedRateLimiter<K> {
+    fn new(quota: Quota, initial_capacity: usize) -> KeyedRateLimiter<K> {
         KeyedRateLimiter {
-            rate_limiter: RateLimiter::hashmap(quota),
-            next_gc_len: 1,
+            rate_limiter: RateLimiter::new(
+                quota,
+                Mutex::new(HashMap::with_capacity(initial_capacity)),
+                &DefaultClock::default(),
+            ),
+            initial_capacity,
+            next_gc_len: initial_capacity,
         }
     }
 
@@ -151,7 +164,7 @@ where
 
             debug!("Garbage collected rate limiter table: {old_len} -> {new_len} entries");
 
-            self.next_gc_len = new_len * 2;
+            self.next_gc_len = max(self.initial_capacity, new_len * 2);
         }
     }
 
@@ -180,9 +193,10 @@ impl Leroy {
                 Quota::with_period(args.bl_period)
                     .expect("Rate limits MUST be non-zero")
                     .allow_burst(args.bl_threshold),
+                args.cache_initial_capacity,
             ),
             recidivism_counts: Cache::builder()
-                .initial_capacity(args.cache_max_size as usize / 5)
+                .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
                 .time_to_live(args.ipset_ban_ttl)
                 .build_with_hasher(Default::default()),
