@@ -7,7 +7,6 @@ use std::{
     collections::HashMap,
     error::Error,
     hash::Hash,
-    io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
     time::{Duration, Instant},
@@ -206,13 +205,6 @@ impl Leroy {
             ban_count_start: Instant::now(),
             args,
         })
-    }
-
-    pub fn handle_lines<B: BufRead>(&mut self, reader: B) -> io::Result<()> {
-        for line in reader.split(b'\n') {
-            self.handle_line(line?);
-        }
-        Ok(())
     }
 
     pub fn handle_line(&mut self, line: Vec<u8>) {

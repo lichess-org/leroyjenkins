@@ -25,5 +25,5 @@ parking_lot = "0.12.1"
 criterion = "0.5.1"
 
 [[bench]]
-name = "dry_run"
+name = "benches"
 harness = false

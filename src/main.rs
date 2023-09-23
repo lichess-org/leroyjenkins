@@ -1,4 +1,4 @@
-use std::{error::Error, io};
+use std::{error::Error, io, io::BufRead};
 
 use clap::Parser;
 use leroyjenkins::{Args, Leroy};
@@ -13,6 +13,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     info!("{:?}", args);
 
-    Leroy::new(args)?.handle_lines(io::stdin().lock())?;
+    let mut leroy = Leroy::new(args)?;
+    for line in io::stdin().lock().split(b'\n') {
+        leroy.handle_line(line?);
+    }
     Ok(())
 }
