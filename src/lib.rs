@@ -1,31 +1,27 @@
 #![feature(addr_parse_ascii)]
 
 mod ip_family;
+mod keyed_limiter;
 
 use std::{
-    cmp::max,
-    hash::BuildHasherDefault,
-    collections::HashMap,
     error::Error,
-    hash::Hash,
+    hash::BuildHasherDefault,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
     time::{Duration, Instant},
 };
 
 use clap::Parser;
-use governor::{
-    clock::{DefaultClock, QuantaInstant},
-    state::keyed::HashMapStateStore,
-    NotUntil, Quota, RateLimiter,
-};
+use governor::Quota;
 use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
-use parking_lot::Mutex;
 use rustc_hash::FxHasher;
 
-use crate::ip_family::{ByIpFamily, IpFamily};
+use crate::{
+    ip_family::{ByIpFamily, IpFamily},
+    keyed_limiter::KeyedLimiter,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -120,7 +116,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ip_rate_limiters: KeyedRateLimiter<Vec<u8>>,
+    ip_rate_limiters: KeyedLimiter<Vec<u8>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -130,48 +126,6 @@ pub struct Leroy {
     ban_count_start: Instant,
 
     args: Args,
-}
-
-struct KeyedRateLimiter<K>
-where
-    K: Hash + Eq + Clone,
-{
-    rate_limiter: RateLimiter<K, HashMapStateStore<K>, DefaultClock>,
-    initial_capacity: usize,
-    next_gc_len: usize,
-}
-
-impl<K> KeyedRateLimiter<K>
-where
-    K: Hash + Eq + Clone,
-{
-    fn new(quota: Quota, initial_capacity: usize) -> KeyedRateLimiter<K> {
-        KeyedRateLimiter {
-            rate_limiter: RateLimiter::new(
-                quota,
-                Mutex::new(HashMap::with_capacity(initial_capacity)),
-                &DefaultClock::default(),
-            ),
-            initial_capacity,
-            next_gc_len: initial_capacity,
-        }
-    }
-
-    fn maybe_gc(&mut self) {
-        if self.rate_limiter.len() >= self.next_gc_len {
-            let old_len = self.rate_limiter.len();
-            self.rate_limiter.retain_recent();
-            let new_len = self.rate_limiter.len();
-
-            debug!("Garbage collected rate limiter table: {old_len} -> {new_len} entries");
-
-            self.next_gc_len = max(self.initial_capacity, new_len * 2);
-        }
-    }
-
-    fn check_key(&mut self, key: &K) -> Result<(), NotUntil<QuantaInstant>> {
-        self.rate_limiter.check_key(key)
-    }
 }
 
 impl Leroy {
@@ -190,7 +144,7 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            ip_rate_limiters: KeyedRateLimiter::new(
+            ip_rate_limiters: KeyedLimiter::new(
                 Quota::with_period(args.bl_period)
                     .expect("Rate limits MUST be non-zero")
                     .allow_burst(args.bl_threshold),
