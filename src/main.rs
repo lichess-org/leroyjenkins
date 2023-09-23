@@ -7,11 +7,12 @@ use std::{
     hash::BuildHasherDefault,
     io::{self, BufRead},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    num::ParseIntError,
+    num::NonZeroU32,
     time::{Duration, Instant},
 };
 
 use clap::Parser;
+use governor::{clock::QuantaInstant, DefaultDirectRateLimiter, NotUntil, Quota, RateLimiter};
 use ipset::{types::HashIp, Session};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
@@ -22,27 +23,37 @@ use crate::ip_family::{ByIpFamily, IpFamily};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// The time we'll keep the nginx log buckets around.
-    /// The user must avoid an nginx log for this long before their
-    /// previous nginx bans are forgotten. Note, the first ban should probably
-    /// be long enough that this will expire during its duration.
-    #[arg(long, value_parser = parse_duration)]
-    bl_ttl: Duration,
-
-    /// The number of times they can show up in the ban log before hammer-time.
+    /// The number of events we will see before a ban decision, combines with
+    /// `bl_period` to determine the exact rate limit.
+    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long)]
-    bl_threshold: u32,
+    bl_threshold: NonZeroU32,
+
+    /// The amount of time before the rate limiter is fully replenished.
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
+    ///
+    /// Combines with `bl_threshold` to determine the exact rate limit
+    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
+    #[arg(long, value_parser = parse_duration)]
+    bl_period: Duration,
 
     /// Recidivists get banned longer for their subsequent bans.
     /// This reperesents the amount of time we'll keep the history around.
     /// Everytime we :hammer-time: them, it will reset this countdown.
     /// The user must avoid an ipset ban for this long before their
     /// previous ipset bans are forgotten.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, value_parser = parse_duration)]
     ipset_ban_ttl: Duration,
 
     /// The time of the first ban. Each subsequent ban will be increased
     /// linearly by this amount (resulting in --ipset-base-time * ban count).
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, value_parser = parse_duration)]
     ipset_base_time: Duration,
 
@@ -56,11 +67,17 @@ struct Args {
 
     /// The number of seconds to accumulate ban counts before reporting and
     /// resetting.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     reporting_ip_time_period: Duration,
 
@@ -84,26 +101,15 @@ impl Args {
     }
 }
 
-fn parse_duration(s: &str) -> Result<Duration, ParseIntError> {
-    let (s, factor) = if let Some(s) = s.strip_suffix('d') {
-        (s, 60 * 60 * 24)
-    } else if let Some(s) = s.strip_suffix('h') {
-        (s, 60 * 60)
-    } else if let Some(s) = s.strip_suffix('m') {
-        (s, 60)
-    } else {
-        (s.strip_suffix('s').unwrap_or(s), 1)
-    };
-
-    Ok(Duration::from_secs(
-        u64::from(s.trim().parse::<u32>()?) * factor,
-    ))
+fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
+    s.parse::<humantime::Duration>().map(|hd| hd.into())
 }
 
 struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ban_log_count_cache: Cache<Vec<u8>, u32, BuildHasherDefault<FxHasher>>,
+    quota: Quota,
+    ip_rate_limiters: Cache<Vec<u8>, DefaultDirectRateLimiter, BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -131,10 +137,14 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            ban_log_count_cache: Cache::builder()
+            quota: Quota::with_period(args.bl_period)
+                .expect("Rate limits MUST Be non-zero")
+                .allow_burst(args.bl_threshold),
+            ip_rate_limiters: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.bl_ttl)
+                // TODO: is 2s + the bl_period enough time? I think so.
+                .time_to_live(Duration::from_secs(2) + args.bl_period)
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_max_size as usize / 5)
@@ -152,18 +162,17 @@ impl Leroy {
     fn handle_line(&mut self, line: Vec<u8>) {
         self.line_count += 1;
 
-        let ban_log_count: u32 = *self.ban_log_count_cache.get(&line).unwrap_or(&0) + 1;
-        if ban_log_count >= self.args.bl_threshold {
-            match IpAddr::parse_ascii(&line) {
-                Ok(ip) => self.ban(ip),
-                Err(err) => error!(
-                    "Error parsing IP from {:?}: {}",
-                    String::from_utf8_lossy(&line),
-                    err
-                ),
+        match self.ip_rate_limiters.get(&line) {
+            Some(rate_limiter) => {
+                let check_result = rate_limiter.check();
+                self.handle_check_result(&line, check_result);
             }
-        }
-        self.ban_log_count_cache.insert(line, ban_log_count);
+            None => {
+                let rate_limiter = RateLimiter::direct(self.quota);
+                self.handle_check_result(&line, rate_limiter.check());
+                self.ip_rate_limiters.insert(line, rate_limiter);
+            }
+        };
 
         if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
@@ -173,6 +182,23 @@ impl Leroy {
             );
             self.line_count = 0;
             self.line_count_start = Instant::now();
+        }
+    }
+
+    fn handle_check_result(
+        &mut self,
+        line: &[u8],
+        check_result: Result<(), NotUntil<QuantaInstant>>,
+    ) {
+        if check_result.is_err() {
+            match IpAddr::parse_ascii(&line) {
+                Ok(ip) => self.ban(ip),
+                Err(err) => error!(
+                    "Error parsing IP from {:?}: {}",
+                    String::from_utf8_lossy(&line),
+                    err
+                ),
+            }
         }
     }
 
