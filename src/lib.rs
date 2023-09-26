@@ -117,6 +117,7 @@ pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
     ip_rate_limiters: KeyedLimiter<Vec<u8>>,
+    ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -150,6 +151,11 @@ impl Leroy {
                     .allow_burst(args.bl_threshold),
                 args.cache_initial_capacity,
             ),
+            ipset_cache: Cache::builder()
+                .initial_capacity(args.cache_initial_capacity)
+                .max_capacity(args.cache_max_size)
+                .time_to_live(args.ipset_base_time.saturating_sub(Duration::from_secs(1)))
+                .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
@@ -191,6 +197,11 @@ impl Leroy {
     }
 
     fn ban(&mut self, ip: IpAddr) {
+        if self.ipset_cache.contains_key(&ip) {
+            debug!("{ip} already banned");
+            return;
+        }
+
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         let timeout = self.args.seconds_to_ban(recidivism);
 
@@ -203,10 +214,11 @@ impl Leroy {
         };
 
         match ban_result {
-            Ok(false) => debug!("{ip} already banned"),
+            Ok(false) => debug!("{ip} already banned, but was no longer cached"),
             Ok(true) => {
                 info!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
                 self.ban_count += 1;
+                self.ipset_cache.insert(ip, ());
                 self.recidivism_counts.insert(ip, recidivism);
             }
             Err(err) => error!("Unable to add {ip} to set: {err}"),
