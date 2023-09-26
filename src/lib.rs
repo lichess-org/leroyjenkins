@@ -147,7 +147,7 @@ impl Leroy {
             })?,
             ip_rate_limiters: KeyedLimiter::new(
                 Quota::with_period(args.bl_period)
-                    .expect("Rate limits MUST be non-zero")
+                    .ok_or_else(|| format!("--bl-period must be non-zero"))?
                     .allow_burst(args.bl_threshold),
                 args.cache_initial_capacity,
             ),
