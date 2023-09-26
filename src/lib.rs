@@ -205,7 +205,7 @@ impl Leroy {
         match ban_result {
             Ok(false) => debug!("{ip} already banned"),
             Ok(true) => {
-                debug!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
+                info!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
                 self.ban_count += 1;
                 self.recidivism_counts.insert(ip, recidivism);
             }
