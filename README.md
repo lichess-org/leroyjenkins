@@ -23,7 +23,7 @@ tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1
 ```
 
 > [!WARNING]
-> *leroyjenkins* itself does nothing wrt. to your iptables rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
+> *leroyjenkins* itself does nothing to your iptables rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
 
 > [!NOTE]
 > Must be run with enough privileges to actually add to ipsets. :joy:
