@@ -30,7 +30,7 @@ pub struct Args {
     /// `bl_period` to determine the exact rate limit.
     /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long)]
-    pub bl_threshold: NonZeroU32,
+    pub bl_threshold: u32,
 
     /// The amount of time before the rate limiter is fully replenished.
     /// Uses humantime to parse the duration.
@@ -113,10 +113,15 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
     s.parse::<humantime::Duration>().map(|hd| hd.into())
 }
 
+pub enum LineHandler {
+    BanOnSite,
+    RateLimit(KeyedLimiter<Vec<u8>>),
+}
+
 pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ip_rate_limiters: KeyedLimiter<Vec<u8>>,
+    line_handler: LineHandler,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
@@ -145,12 +150,16 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            ip_rate_limiters: KeyedLimiter::new(
-                Quota::with_period(args.bl_period)
-                    .ok_or_else(|| format!("--bl-period must be non-zero"))?
-                    .allow_burst(args.bl_threshold),
-                args.cache_initial_capacity,
-            ),
+            line_handler: TryInto::<NonZeroU32>::try_into(args.bl_threshold)
+                .and_then(|t: NonZeroU32| {
+                    Ok(LineHandler::RateLimit(KeyedLimiter::new(
+                        Quota::with_period(args.bl_period)
+                            .expect("--bl-period must be non-zero")
+                            .allow_burst(t),
+                        args.cache_initial_capacity,
+                    )))
+                })
+                .unwrap_or(LineHandler::BanOnSite),
             ipset_cache: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
@@ -169,10 +178,24 @@ impl Leroy {
         })
     }
 
+    pub fn should_ban(&mut self, line: &Vec<u8>) -> bool {
+        match &mut self.line_handler {
+            LineHandler::BanOnSite => true,
+            LineHandler::RateLimit(rate_limiter) => rate_limiter.check_key(&line).is_err(),
+        }
+    }
+
+    pub fn maybe_gc(&mut self) {
+        match &mut self.line_handler {
+            LineHandler::RateLimit(rate_limiter) => rate_limiter.maybe_gc(),
+            _ => (),
+        }
+    }
+
     pub fn handle_line(&mut self, line: Vec<u8>) {
         self.line_count += 1;
 
-        if self.ip_rate_limiters.check_key(&line).is_err() {
+        if self.should_ban(&line) {
             match IpAddr::parse_ascii(&line) {
                 Ok(ip) => self.ban(ip),
                 Err(err) => error!(
@@ -183,7 +206,7 @@ impl Leroy {
             }
         }
 
-        self.ip_rate_limiters.maybe_gc();
+        self.maybe_gc();
 
         if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(
