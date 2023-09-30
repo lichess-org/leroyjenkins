@@ -1,11 +1,11 @@
-use std::{net::Ipv4Addr, num::NonZeroU32, time::Duration};
+use std::{net::Ipv4Addr, time::Duration};
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use leroyjenkins::{Args, Leroy};
 
 fn make_leroy() -> Leroy {
     Leroy::new(Args {
-        bl_threshold: NonZeroU32::new(10).unwrap(),
+        bl_threshold: 10,
         bl_period: Duration::from_secs(5),
         ipset_base_time: Duration::from_secs(30),
         ipset_ban_ttl: Duration::from_secs(60 * 60),
