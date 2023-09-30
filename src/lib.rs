@@ -154,6 +154,9 @@ impl Leroy {
                 .and_then(|t: NonZeroU32| {
                     Ok(LineHandler::RateLimit(KeyedLimiter::new(
                         Quota::with_period(args.bl_period)
+                            // TODO: should be able to properly deal with the error here, rather than
+                            // panicing, but I dind't figure it out fast enough for my available time
+                            // today
                             .expect("--bl-period must be non-zero")
                             .allow_burst(t),
                         args.cache_initial_capacity,
