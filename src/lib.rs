@@ -26,11 +26,11 @@ use crate::{
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// The number of events we will see before a ban decision, combines with
-    /// `bl_period` to determine the exact rate limit.
+    /// The number of events that has to be exceeded before a ban decision.
+    /// Combines with `bl_period` to determine the exact rate limit.
     /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long)]
-    pub bl_threshold: NonZeroU32,
+    pub bl_threshold: u32,
 
     /// The amount of time before the rate limiter is fully replenished.
     /// Uses humantime to parse the duration.
@@ -38,7 +38,7 @@ pub struct Args {
     ///
     /// Combines with `bl_threshold` to determine the exact rate limit
     /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
-    #[arg(long, value_parser = parse_duration)]
+    #[arg(long, default_value = "0s", value_parser = parse_duration)]
     pub bl_period: Duration,
 
     /// Recidivists get banned longer for their subsequent bans.
@@ -116,7 +116,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ip_rate_limiters: KeyedLimiter<Vec<u8>>,
+    ip_rate_limiters: Option<KeyedLimiter<Vec<u8>>>,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
@@ -145,12 +145,15 @@ impl Leroy {
                 }
                 Ok(session)
             })?,
-            ip_rate_limiters: KeyedLimiter::new(
-                Quota::with_period(args.bl_period)
-                    .ok_or_else(|| format!("--bl-period must be non-zero"))?
-                    .allow_burst(args.bl_threshold),
-                args.cache_initial_capacity,
-            ),
+            ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
+                Some(bl_threshold) => Some(KeyedLimiter::new(
+                    Quota::with_period(args.bl_period)
+                        .ok_or_else(|| format!("--bl-period must be non-zero"))?
+                        .allow_burst(bl_threshold),
+                    args.cache_initial_capacity,
+                )),
+                None => None, // ban on sight
+            },
             ipset_cache: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
@@ -172,7 +175,11 @@ impl Leroy {
     pub fn handle_line(&mut self, line: Vec<u8>) {
         self.line_count += 1;
 
-        if self.ip_rate_limiters.check_key(&line).is_err() {
+        if self
+            .ip_rate_limiters
+            .as_mut()
+            .map_or(true, |l| l.check_key(&line).is_err())
+        {
             match IpAddr::parse_ascii(&line) {
                 Ok(ip) => self.ban(ip),
                 Err(err) => error!(
@@ -182,8 +189,6 @@ impl Leroy {
                 ),
             }
         }
-
-        self.ip_rate_limiters.maybe_gc();
 
         if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
             info!(

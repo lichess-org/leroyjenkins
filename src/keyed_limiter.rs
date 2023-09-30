@@ -121,6 +121,7 @@ where
     }
 
     pub fn check_key(&mut self, key: &K) -> Result<(), NotUntil<QuantaInstant>> {
+        self.maybe_gc();
         self.rate_limiter.check_key(key)
     }
 
