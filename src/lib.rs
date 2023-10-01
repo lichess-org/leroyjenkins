@@ -190,7 +190,9 @@ impl Leroy {
             }
         }
 
-        if self.line_count_start.elapsed() > self.args.reporting_ip_time_period {
+        if self.line_count % 10 == 0
+            && self.line_count_start.elapsed() > self.args.reporting_ip_time_period
+        {
             info!(
                 "Seen {} lines since {:?}",
                 self.line_count,
