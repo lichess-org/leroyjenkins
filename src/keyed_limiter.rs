@@ -83,7 +83,7 @@ where
     }
 
     fn shrink_to_fit(&self) {
-        self.buckets.borrow_mut().shrink_to_fit()
+        self.buckets.borrow_mut().shrink_to_fit();
     }
 
     fn len(&self) -> usize {

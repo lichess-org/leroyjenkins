@@ -110,7 +110,7 @@ impl Args {
 }
 
 fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
-    s.parse::<humantime::Duration>().map(|hd| hd.into())
+    s.parse::<humantime::Duration>().map(Into::into)
 }
 
 pub struct Leroy {
