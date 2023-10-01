@@ -12,6 +12,7 @@ edition = "2021"
 bench = false # Use criterion harness
 
 [profile.release]
+lto = true
 strip = true
 
 [dependencies]
