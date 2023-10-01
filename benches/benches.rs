@@ -2,6 +2,10 @@ use std::{net::Ipv4Addr, time::Duration};
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use leroyjenkins::{Args, Leroy};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 fn make_leroy() -> Leroy {
     Leroy::new(Args {
