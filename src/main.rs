@@ -18,8 +18,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("{:?}", args);
 
     let mut leroy = Leroy::new(args)?;
-    for line in io::stdin().lock().split(b'\n') {
-        leroy.handle_line(line?);
+
+    let mut stdin = io::stdin().lock();
+    let mut line = Vec::with_capacity(40);
+    while stdin.read_until(b'\n', &mut line)? != 0 {
+        if line[line.len() - 1] == b'\n' {
+            line.pop();
+        }
+        leroy.handle_line(&line);
+        line.clear();
     }
+
     Ok(())
 }

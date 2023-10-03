@@ -172,19 +172,19 @@ impl Leroy {
         })
     }
 
-    pub fn handle_line(&mut self, line: Vec<u8>) {
+    pub fn handle_line(&mut self, line: &Vec<u8>) {
         self.line_count += 1;
 
         if self
             .ip_rate_limiters
             .as_mut()
-            .map_or(true, |l| l.check_key(&line).is_err())
+            .map_or(true, |l| l.check_key(line).is_err())
         {
-            match IpAddr::parse_ascii(&line) {
+            match IpAddr::parse_ascii(line) {
                 Ok(ip) => self.ban(ip),
                 Err(err) => error!(
                     "Error parsing IP from {:?}: {}",
-                    String::from_utf8_lossy(&line),
+                    String::from_utf8_lossy(line),
                     err
                 ),
             }
