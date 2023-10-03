@@ -12,8 +12,9 @@ edition = "2021"
 bench = false # Use criterion harness
 
 [profile.release]
-lto = true
-strip = true
+codegen-units = 1
+lto = "fat"
+strip = "symbols"
 
 [dependencies]
 mini-moka = "0.10.2"
