@@ -1,7 +1,8 @@
 use std::{
     cell::{Cell, RefCell},
     cmp::max,
-    hash::Hash,
+    collections::HashMap,
+    hash::{BuildHasher, Hash},
     num::NonZeroU64,
 };
 
@@ -12,7 +13,6 @@ use governor::{
     NotUntil, Quota, RateLimiter,
 };
 use log::debug;
-use rustc_hash::FxHashMap;
 
 #[derive(Default)]
 struct UnsyncInMemoryState {
@@ -35,27 +35,22 @@ impl UnsyncInMemoryState {
     }
 }
 
-struct FxHashMapStateStore<K> {
-    buckets: RefCell<FxHashMap<K, UnsyncInMemoryState>>,
+struct UnsyncHashMapStateStore<K, S> {
+    buckets: RefCell<HashMap<K, UnsyncInMemoryState, S>>,
 }
 
-impl<K> FxHashMapStateStore<K>
-where
-    K: Hash + Eq,
-{
-    fn with_capacity(initial_capacity: usize) -> FxHashMapStateStore<K> {
-        FxHashMapStateStore {
-            buckets: RefCell::new(FxHashMap::with_capacity_and_hasher(
-                initial_capacity,
-                Default::default(),
-            )),
+impl<K, S> UnsyncHashMapStateStore<K, S> {
+    fn with_capacity_and_hasher(capacity: usize, hasher: S) -> UnsyncHashMapStateStore<K, S> {
+        UnsyncHashMapStateStore {
+            buckets: RefCell::new(HashMap::with_capacity_and_hasher(capacity, hasher)),
         }
     }
 }
 
-impl<K> StateStore for FxHashMapStateStore<K>
+impl<K, S> StateStore for UnsyncHashMapStateStore<K, S>
 where
     K: Hash + Eq + Clone,
+    S: BuildHasher,
 {
     type Key = K;
 
@@ -72,9 +67,10 @@ where
     }
 }
 
-impl<K> ShrinkableKeyedStateStore<K> for FxHashMapStateStore<K>
+impl<K, S> ShrinkableKeyedStateStore<K> for UnsyncHashMapStateStore<K, S>
 where
     K: Hash + Eq + Clone,
+    S: BuildHasher,
 {
     fn retain_recent(&self, drop_below: Nanos) {
         self.buckets
@@ -95,24 +91,26 @@ where
     }
 }
 
-pub struct KeyedLimiter<K>
+pub struct KeyedLimiter<K, S>
 where
     K: Hash + Eq + Clone,
+    S: BuildHasher,
 {
-    rate_limiter: RateLimiter<K, FxHashMapStateStore<K>, DefaultClock>,
+    rate_limiter: RateLimiter<K, UnsyncHashMapStateStore<K, S>, DefaultClock>,
     initial_capacity: usize,
     next_gc_len: usize,
 }
 
-impl<K> KeyedLimiter<K>
+impl<K, S> KeyedLimiter<K, S>
 where
     K: Hash + Eq + Clone,
+    S: BuildHasher,
 {
-    pub fn new(quota: Quota, initial_capacity: usize) -> KeyedLimiter<K> {
+    pub fn new(quota: Quota, initial_capacity: usize, hasher: S) -> KeyedLimiter<K, S> {
         KeyedLimiter {
             rate_limiter: RateLimiter::new(
                 quota,
-                FxHashMapStateStore::with_capacity(initial_capacity),
+                UnsyncHashMapStateStore::with_capacity_and_hasher(initial_capacity, hasher),
                 &DefaultClock::default(),
             ),
             initial_capacity,

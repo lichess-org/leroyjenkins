@@ -116,7 +116,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 pub struct Leroy {
     sessions: ByIpFamily<Session<HashIp>>,
 
-    ip_rate_limiters: Option<KeyedLimiter<Vec<u8>>>,
+    ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
@@ -151,6 +151,7 @@ impl Leroy {
                         .ok_or_else(|| format!("--bl-period must be non-zero"))?
                         .allow_burst(bl_threshold),
                     args.cache_initial_capacity,
+                    BuildHasherDefault::default(),
                 )),
                 None => None, // ban on sight
             },
