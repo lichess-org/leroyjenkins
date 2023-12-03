@@ -537,11 +537,24 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "ipset"
-version = "0.4.0"
-source = "git+https://github.com/lazytiger/ipset?rev=30acafe4f8d2efd465dfe8b1f11ba2bddcd406d4#30acafe4f8d2efd465dfe8b1f11ba2bddcd406d4"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "190842efb651faa61b2705d6050352a3097ecabfc545d67236f072c0b2c5508e"
 dependencies = [
+ "cc",
  "derive_more",
+ "ipset_derive",
  "libc",
+]
+
+[[package]]
+name = "ipset_derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db6d64e879badf39e93df3831cb2902d290a2db61f8a46f299a681a2a601e0"
+dependencies = [
+ "quote",
+ "syn 2.0.39",
 ]
 
 [[package]]
