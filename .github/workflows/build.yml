@@ -13,7 +13,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo build --release
       - run: cargo bench --no-run
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: leroyjenkins
           path: target/release/leroyjenkins
