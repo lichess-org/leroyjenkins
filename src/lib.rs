@@ -13,7 +13,10 @@ use std::{
 
 use clap::Parser;
 use governor::Quota;
-use ipset::{types::HashIp, Session};
+use ipset::{
+    types::{AddOption, HashIp},
+    Session,
+};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use rustc_hash::FxHasher;
@@ -218,7 +221,7 @@ impl Leroy {
         } else {
             self.sessions
                 .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-                .add(ip, Some(timeout))
+                .add(ip, vec![AddOption::Timeout(timeout)])
         };
 
         match ban_result {
