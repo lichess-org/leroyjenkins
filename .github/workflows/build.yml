@@ -54,7 +54,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: target/release/leroyjenkins-debian-${{ matrix.debian }}
+          name: leroyjenkins-debian-${{ matrix.debian }}
           path: target/release/leroyjenkins
           retention-days: 90
 
