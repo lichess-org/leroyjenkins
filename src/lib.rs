@@ -2,6 +2,7 @@
 
 mod ip_family;
 mod keyed_limiter;
+mod nft_session;
 
 use std::{
     error::Error,
@@ -13,17 +14,15 @@ use std::{
 
 use clap::Parser;
 use governor::Quota;
-use ipset::{
-    types::{AddOption, HashIp},
-    Session,
-};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
+use nftables::types::NfFamily;
 use rustc_hash::FxHasher;
 
 use crate::{
     ip_family::{ByIpFamily, IpFamily},
     keyed_limiter::KeyedLimiter,
+    nft_session::NftSession,
 };
 
 #[derive(Parser, Debug)]
@@ -117,7 +116,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 pub struct Leroy {
-    sessions: ByIpFamily<Session<HashIp>>,
+    sessions: ByIpFamily<NftSession>,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
@@ -136,14 +135,27 @@ impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         Ok(Leroy {
             sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
-                let (name, localhost) = match family {
-                    IpFamily::V4 => (&args.ipset_ipv4_name, IpAddr::V4(Ipv4Addr::LOCALHOST)),
-                    IpFamily::V6 => (&args.ipset_ipv6_name, IpAddr::V6(Ipv6Addr::LOCALHOST)),
+                let (name, localhost, nf_family) = match family {
+                    IpFamily::V4 => (
+                        &args.ipset_ipv4_name,
+                        IpAddr::V4(Ipv4Addr::LOCALHOST),
+                        NfFamily::INet,
+                    ),
+                    IpFamily::V6 => (
+                        &args.ipset_ipv6_name,
+                        IpAddr::V6(Ipv6Addr::LOCALHOST),
+                        NfFamily::INet,
+                    ),
                 };
-                let mut session = Session::<HashIp>::new(name.clone());
+                let mut session = NftSession::new(
+                    "leroy".to_string(),
+                    name.clone(),
+                    nf_family,
+                );
+                session.set_dry_run(args.dry_run);
                 if !args.dry_run {
                     session.test(localhost).map_err(|err| {
-                        format!("Failed to test set {name:?}: {err}. Please create before running.")
+                        format!("Failed to test set {name:?} in table 'leroy': {err}. Please create the table and set before running.")
                     })?;
                 }
                 Ok(session)
@@ -216,13 +228,10 @@ impl Leroy {
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         let timeout = self.args.seconds_to_ban(recidivism);
 
-        let ban_result = if self.args.dry_run {
-            Ok(true)
-        } else {
-            self.sessions
-                .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-                .add(ip, vec![AddOption::Timeout(timeout)])
-        };
+        let ban_result = self
+            .sessions
+            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
+            .add(ip, timeout);
 
         match ban_result {
             Ok(false) => debug!("{ip} already banned, but was no longer cached"),
