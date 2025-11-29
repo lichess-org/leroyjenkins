@@ -68,13 +68,13 @@ jobs:
       - name: Download Bookworm artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: leroyjenkins-debian-bookworm-*
+          pattern: leroyjenkins-debian-bookworm
           merge-multiple: true
 
       - name: Download Trixie artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: leroyjenkins-debian-trixie-*
+          pattern: leroyjenkins-debian-trixie
           merge-multiple: true
 
       - name: Create GitHub release
