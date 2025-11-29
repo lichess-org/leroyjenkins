@@ -1,21 +1,33 @@
-use std::{borrow::Cow, error::Error, net::IpAddr};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    error::Error,
+    net::IpAddr,
+    time::{Duration, Instant},
+};
 
 use log::debug;
 use nftables::{
     batch::Batch,
-    expr,
-    helper,
+    expr, helper,
     schema::{Element, NfListObject},
     types::NfFamily,
 };
 
 /// Wrapper around nftables for managing IP ban sets with timeouts.
 /// Mimics the API of ipset::Session<HashIp> for easier migration.
+/// Implements batching to reduce syscalls.
 pub struct NftSession {
     table: String,
     set: String,
     family: NfFamily,
     dry_run: bool,
+
+    // Batching state
+    pending_ips: Vec<(IpAddr, u32)>,
+    last_flush: Instant,
+    batch_size: usize,
+    batch_timeout: Duration,
 }
 
 impl NftSession {
@@ -25,12 +37,24 @@ impl NftSession {
     /// * `table` - The nftables table name (e.g., "leroyjenkins")
     /// * `set` - The set name within the table (e.g., "leroy4" or "leroy6")
     /// * `family` - The IP family (NfFamily::IP or NfFamily::IP6)
-    pub fn new(table: String, set: String, family: NfFamily) -> Self {
+    /// * `batch_size` - Max IPs to batch before flush
+    /// * `batch_timeout` - Max time to wait before flush
+    pub fn new(
+        table: String,
+        set: String,
+        family: NfFamily,
+        batch_size: usize,
+        batch_timeout: Duration,
+    ) -> Self {
         NftSession {
             table,
             set,
             family,
             dry_run: false,
+            pending_ips: Vec::with_capacity(batch_size),
+            last_flush: Instant::now(),
+            batch_size,
+            batch_timeout,
         }
     }
 
@@ -53,17 +77,12 @@ impl NftSession {
         let ruleset = helper::get_current_ruleset()?;
 
         // Look for our specific set in the ruleset
-        let set_exists = ruleset
-            .objects
-            .iter()
-            .any(|obj| match obj {
-                nftables::schema::NfObject::ListObject(NfListObject::Set(set)) => {
-                    set.family == self.family
-                        && set.table == self.table
-                        && set.name == self.set
-                }
-                _ => false,
-            });
+        let set_exists = ruleset.objects.iter().any(|obj| match obj {
+            nftables::schema::NfObject::ListObject(NfListObject::Set(set)) => {
+                set.family == self.family && set.table == self.table && set.name == self.set
+            }
+            _ => false,
+        });
 
         if set_exists {
             Ok(true)
@@ -77,43 +96,95 @@ impl NftSession {
     }
 
     /// Add an IP address to the set with a specific timeout.
+    /// Uses batching to reduce syscalls - flushes when timeout expires OR batch_size reached.
     ///
     /// # Arguments
     /// * `ip` - The IP address to ban
     /// * `timeout` - The timeout in seconds
     ///
     /// # Returns
-    /// * `Ok(true)` - Element was added (we always return true since nftables doesn't report duplicates)
-    /// * `Err(_)` - Failed to add element
-    pub fn add(&self, ip: IpAddr, timeout: u32) -> Result<bool, Box<dyn Error>> {
+    /// * `Ok(true)` - Element was queued/added
+    /// * `Err(_)` - Failed to flush batch
+    pub fn add(&mut self, ip: IpAddr, timeout: u32) -> Result<bool, Box<dyn Error>> {
         if self.dry_run {
-            debug!("Dry-run: would add {} to set {} with timeout {}s", ip, self.set, timeout);
+            debug!(
+                "Dry-run: would add {} to set {} with timeout {}s",
+                ip, self.set, timeout
+            );
             return Ok(true);
         }
 
+        // Flush if timeout expired OR batch size reached (check before adding)
+        if !self.pending_ips.is_empty()
+            && (self.last_flush.elapsed() >= self.batch_timeout
+                || self.pending_ips.len() >= self.batch_size)
+        {
+            self.flush()?;
+        }
+
+        // Add to pending batch
+        self.pending_ips.push((ip, timeout));
+
+        Ok(true)
+    }
+
+    /// Flush all pending IPs to nftables in a single batch.
+    /// Groups IPs by timeout since nftables requires same timeout per Element.
+    fn flush(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.pending_ips.is_empty() {
+            return Ok(());
+        }
+
+        // Group IPs by timeout value
+        let mut by_timeout: HashMap<u32, Vec<IpAddr>> = HashMap::new();
+        for (ip, timeout) in self.pending_ips.drain(..) {
+            by_timeout.entry(timeout).or_default().push(ip);
+        }
+
+        // uncomment to see batches working
+        // info!(
+        //     "Flushing batch of {} IPs ({} timeout groups) to set {}",
+        //     batch_size,
+        //     by_timeout.len(),
+        //     self.set
+        // );
+
+        // Create batch with one Element per timeout group
         let mut batch = Batch::new();
+        for (timeout, ips) in by_timeout {
+            // Create Expression for each IP with its timeout
+            let elem_exprs: Vec<expr::Expression> = ips
+                .into_iter()
+                .map(|ip| {
+                    expr::Expression::Named(expr::NamedExpression::Elem(expr::Elem {
+                        val: Box::new(expr::Expression::String(ip.to_string().into())),
+                        timeout: Some(timeout),
+                        expires: None,
+                        comment: None,
+                        counter: None,
+                    }))
+                })
+                .collect();
 
-        // Create the element with timeout using nftables Expression types
-        let elem = Element {
-            family: self.family.clone(),
-            table: Cow::Borrowed(&self.table),
-            name: Cow::Borrowed(&self.set),
-            elem: Cow::Owned(vec![
-                expr::Expression::Named(expr::NamedExpression::Elem(expr::Elem {
-                    val: Box::new(expr::Expression::String(ip.to_string().into())),
-                    timeout: Some(timeout),
-                    expires: None,
-                    comment: None,
-                    counter: None,
-                }))
-            ]),
-        };
+            batch.add(NfListObject::Element(Element {
+                family: self.family.clone(),
+                table: Cow::Borrowed(&self.table),
+                name: Cow::Borrowed(&self.set),
+                elem: Cow::Owned(elem_exprs),
+            }));
+        }
 
-        batch.add(NfListObject::Element(elem));
-
+        // Apply the batch
         let ruleset = batch.to_nftables();
         helper::apply_ruleset(&ruleset)?;
 
-        Ok(true)
+        self.last_flush = Instant::now();
+        Ok(())
+    }
+
+    /// Flush pending IPs on shutdown.
+    /// Public method to allow explicit flushing before process exit.
+    pub fn flush_on_shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+        self.flush()
     }
 }

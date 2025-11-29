@@ -100,6 +100,19 @@ pub struct Args {
     /// without privileges.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Maximum number of IPs to batch before flushing to nftables.
+    /// Higher values reduce syscalls but increase ban latency.
+    #[arg(long, default_value = "100")]
+    pub batch_size: usize,
+
+    /// Maximum time to wait before flushing batch to nftables.
+    /// Ensures IPs are banned even if batch_size not reached.
+    ///
+    /// Uses humantime to parse the duration.
+    /// See: https://docs.rs/humantime/latest/humantime/ for details
+    #[arg(long, default_value = "100ms", value_parser = parse_duration)]
+    pub batch_timeout: Duration,
 }
 
 impl Args {
@@ -151,6 +164,8 @@ impl Leroy {
                     "leroy".to_string(),
                     name.clone(),
                     nf_family,
+                    args.batch_size,
+                    args.batch_timeout,
                 );
                 session.set_dry_run(args.dry_run);
                 if !args.dry_run {
@@ -210,9 +225,9 @@ impl Leroy {
             && self.line_count_start.elapsed() > self.args.reporting_ip_time_period
         {
             info!(
-                "Seen {} lines since {:?}",
+                "Seen {} lines since {:?}s",
                 self.line_count,
-                self.line_count_start.elapsed()
+                self.line_count_start.elapsed().as_secs()
             );
             self.line_count = 0;
             self.line_count_start = Instant::now();
@@ -236,7 +251,7 @@ impl Leroy {
         match ban_result {
             Ok(false) => debug!("{ip} already banned, but was no longer cached"),
             Ok(true) => {
-                info!("Banned {ip} for {timeout}s (recidivism: {recidivism})");
+                info!("Banning {ip} for {timeout}s (recidivism: {recidivism})");
                 self.ban_count += 1;
                 self.ipset_cache.insert(ip, ());
                 self.recidivism_counts.insert(ip, recidivism);
@@ -246,12 +261,20 @@ impl Leroy {
 
         if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
             info!(
-                "Banned {} ips in the past {:?}",
+                "Queued {} ips to the batch in the past {:?}s",
                 self.ban_count,
-                self.ban_count_start.elapsed()
+                self.ban_count_start.elapsed().as_secs()
             );
             self.ban_count = 0;
             self.ban_count_start = Instant::now();
         }
+    }
+}
+
+impl Drop for Leroy {
+    fn drop(&mut self) {
+        // Flush any pending IPs before shutdown
+        let _ = self.sessions.ipv4.flush_on_shutdown();
+        let _ = self.sessions.ipv6.flush_on_shutdown();
     }
 }
