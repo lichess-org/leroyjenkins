@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+- When reporting information to me, be extremely concise and sacrifice
+  grammar for the sake of concision.
+
 ## Project Overview
 
 leroyjenkins is a lightweight IP banning tool that reads IP addresses from stdin and automatically manages nftables sets based on configurable rate limits and recidivism tracking. It's designed for high-performance DDoS mitigation, reading from log streams and dynamically adding repeat offenders to nftables sets with exponentially increasing ban durations.
