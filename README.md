@@ -8,25 +8,74 @@ Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_Q
 cargo +nightly build --release
 ```
 
-You may need to install the nightly toolchain with `rustup`:
+You need to install the nightly toolchain with `rustup`:
 
 ```sh
 rustup toolchain install nightly
 ```
 
+## Setup
+
+Before running, create the nftables table and sets, leroy expects these to exist:
+
+```sh
+#!/usr/sbin/nft -f
+
+table inet leroy {
+    # Define our sets
+    set leroy4 {
+        type ipv4_addr;
+        timeout 60s;
+        size 65536;
+        flags interval;
+        auto-merge;
+    }
+
+    set leroy6 {
+        type ipv6_addr;
+        timeout 60s;
+        size 65536;
+        flags interval;
+        auto-merge;
+    }
+
+    chain input {
+        # accept everybody by default in this chain, with a really
+        # high priority so that we can reject them as early as
+        # possible in the Netfilter system
+        type filter hook input priority -900; policy accept;
+
+        # but if you match, you're out
+        ip  saddr @leroy4         counter name leroyed reject with tcp reset
+        ip6 saddr @leroy6         counter name leroyed reject with tcp reset
+    }
+
+    chain output {
+        # accept everybody by default in this chain, with a really
+        # high priority so that we can reject them as early as
+        # possible in the Netfilter system
+        type filter hook output priority -900; policy accept;
+
+        # but if you match, you're out
+        ip  daddr @leroy4 reject with tcp reset
+        ip6 daddr @leroy6 reject with tcp reset
+    }
+}
+```
+
 ## Usage
 
-*leroyjenkins* reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will added to the ipset with the specified timeout.
+*leroyjenkins* reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will be added to the nftables set with the specified timeout.
 
 ```sh
 tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ipset-base-time=100s --ipset-ban-ttl=1d --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4
 ```
 
 > [!WARNING]
-> *leroyjenkins* itself does nothing to your iptables rules. Use iptables (or your firewall of choice) to ban traffic when the IP matches any in the ipset.
+> *leroyjenkins* itself does nothing to your firewall rules. Use the nftables rules above.
 
 > [!NOTE]
-> Must be run with enough privileges to actually add to ipsets. :joy:
+> Must be run with enough privileges to actually modify nftables sets.
 
 ## Examples
 
