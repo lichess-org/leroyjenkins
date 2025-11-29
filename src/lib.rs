@@ -138,9 +138,6 @@ pub struct Leroy {
     line_count: u64,
     line_count_start: Instant,
 
-    ban_count: u64,
-    ban_count_start: Instant,
-
     args: Args,
 }
 
@@ -196,9 +193,7 @@ impl Leroy {
                 .time_to_live(args.ipset_ban_ttl)
                 .build_with_hasher(Default::default()),
             line_count: 0,
-            ban_count: 0,
             line_count_start: Instant::now(),
-            ban_count_start: Instant::now(),
             args,
         })
     }
@@ -251,22 +246,10 @@ impl Leroy {
         match ban_result {
             Ok(false) => debug!("{ip} already banned, but was no longer cached"),
             Ok(true) => {
-                info!("Banning {ip} for {timeout}s (recidivism: {recidivism})");
-                self.ban_count += 1;
                 self.ipset_cache.insert(ip, ());
                 self.recidivism_counts.insert(ip, recidivism);
             }
             Err(err) => error!("Unable to add {ip} to set: {err}"),
-        }
-
-        if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
-            info!(
-                "Queued {} ips to the batch in the past {:?}s",
-                self.ban_count,
-                self.ban_count_start.elapsed().as_secs()
-            );
-            self.ban_count = 0;
-            self.ban_count_start = Instant::now();
         }
     }
 }

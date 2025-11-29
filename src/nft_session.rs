@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::debug;
+use log::{debug, info};
 use nftables::{
     batch::Batch,
     expr, helper,
@@ -135,19 +135,35 @@ impl NftSession {
             return Ok(());
         }
 
+        let total_ips = self.pending_ips.len();
+
         // Group IPs by timeout value
         let mut by_timeout: HashMap<u32, Vec<IpAddr>> = HashMap::new();
         for (ip, timeout) in self.pending_ips.drain(..) {
             by_timeout.entry(timeout).or_default().push(ip);
         }
 
-        // uncomment to see batches working
-        // info!(
-        //     "Flushing batch of {} IPs ({} timeout groups) to set {}",
-        //     batch_size,
-        //     by_timeout.len(),
-        //     self.set
-        // );
+        // Log batch flush with timeout distribution
+        info!(
+            target: "leroyjenkins",
+            "Flushing batch of {} IPs to set {} ({}s since last flush):",
+            total_ips,
+            self.set,
+            self.last_flush.elapsed().as_secs()
+        );
+
+        if total_ips < 5 {
+            // Show individual IPs for small batches
+            for (timeout, ips) in &by_timeout {
+                let ip_list: Vec<String> = ips.iter().map(|ip| ip.to_string()).collect();
+                info!(target: "leroyjenkins", "  - {}s timeout: {}", timeout, ip_list.join(", "));
+            }
+        } else {
+            // Show counts only for large batches
+            for (timeout, ips) in &by_timeout {
+                info!(target: "leroyjenkins", "  - {}s timeout: {} IPs", timeout, ips.len());
+            }
+        }
 
         // Create batch with one Element per timeout group
         let mut batch = Batch::new();
