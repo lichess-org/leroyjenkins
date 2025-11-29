@@ -51,16 +51,11 @@ jobs:
           ./target/release/leroyjenkins --version
           ldd target/release/leroyjenkins
 
-      - name: Rename binary with git SHA
-        run: |
-          GIT_SHA=$(git rev-parse --short HEAD)
-          cp target/release/leroyjenkins leroyjenkins-debian-${{ matrix.debian }}-${GIT_SHA}
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: leroyjenkins-debian-${{ matrix.debian }}-${{ github.sha }}
-          path: leroyjenkins-debian-${{ matrix.debian }}-*
+          name: target/release/leroyjenkins-debian-${{ matrix.debian }}
+          path: target/release/leroyjenkins-debian-${{ matrix.debian }}
           retention-days: 90
 
   release:
