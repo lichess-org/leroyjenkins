@@ -1,19 +1,89 @@
-name: Build
+name: Build Debian Releases
 
 on:
-  - push
-  - pull_request
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-20.04
+  build-debian:
+    strategy:
+      matrix:
+        debian: [bookworm, trixie]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:${{ matrix.debian }}
     steps:
-      - run: sudo apt-get update && sudo apt-get install -y libipset-dev
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo build --release
-      - run: cargo bench --no-run
-      - uses: actions/upload-artifact@v4
+      - name: Install system dependencies
+        run: |
+          apt-get update && apt-get install -y \
+            curl \
+            build-essential \
+            pkg-config \
+            libipset-dev \
+            libnftables-dev \
+            git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
         with:
-          name: leroyjenkins
-          path: target/release/leroyjenkins
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.debian }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.debian }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Verify binary
+        run: |
+          ./target/release/leroyjenkins --version
+          ldd target/release/leroyjenkins
+
+      - name: Rename binary with git SHA
+        run: |
+          GIT_SHA=$(git rev-parse --short HEAD)
+          cp target/release/leroyjenkins leroyjenkins-debian-${{ matrix.debian }}-${GIT_SHA}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leroyjenkins-debian-${{ matrix.debian }}-${{ github.sha }}
+          path: leroyjenkins-debian-${{ matrix.debian }}-*
+          retention-days: 90
+
+  release:
+    needs: build-debian
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Bookworm artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: leroyjenkins-debian-bookworm-*
+          merge-multiple: true
+
+      - name: Download Trixie artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: leroyjenkins-debian-trixie-*
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: leroyjenkins-debian-*
+          fail_on_unmatched_files: true
