@@ -7,7 +7,7 @@ mod nft_session;
 use std::{
     error::Error,
     hash::BuildHasherDefault,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::IpAddr,
     num::NonZeroU32,
     time::{Duration, Instant},
 };
@@ -16,7 +16,7 @@ use clap::Parser;
 use governor::Quota;
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
-use nftables::types::NfFamily;
+use nftnl::ProtoFamily;
 use rustc_hash::FxHasher;
 
 use crate::{
@@ -95,24 +95,6 @@ pub struct Args {
     /// The maximum number of entries to keep in the recidivism cache.
     #[arg(long, default_value = "500000")]
     pub cache_max_size: u64,
-
-    /// Do not actually actually test or manage ipsets. Useful for test runs
-    /// without privileges.
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Maximum number of IPs to batch before flushing to nftables.
-    /// Higher values reduce syscalls but increase ban latency.
-    #[arg(long, default_value = "100")]
-    pub batch_size: usize,
-
-    /// Maximum time to wait before flushing batch to nftables.
-    /// Ensures IPs are banned even if batch_size not reached.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, default_value = "100ms", value_parser = parse_duration)]
-    pub batch_timeout: Duration,
 }
 
 impl Args {
@@ -145,32 +127,15 @@ impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         Ok(Leroy {
             sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
-                let (name, localhost, nf_family) = match family {
-                    IpFamily::V4 => (
-                        &args.ipset_ipv4_name,
-                        IpAddr::V4(Ipv4Addr::LOCALHOST),
-                        NfFamily::INet,
-                    ),
-                    IpFamily::V6 => (
-                        &args.ipset_ipv6_name,
-                        IpAddr::V6(Ipv6Addr::LOCALHOST),
-                        NfFamily::INet,
-                    ),
+                let (name, proto_family) = match family {
+                    IpFamily::V4 => (&args.ipset_ipv4_name, ProtoFamily::Ipv4),
+                    IpFamily::V6 => (&args.ipset_ipv6_name, ProtoFamily::Ipv6),
                 };
-                let mut session = NftSession::new(
+                Ok(NftSession::new(
                     "leroy".to_string(),
                     name.clone(),
-                    nf_family,
-                    args.batch_size,
-                    args.batch_timeout,
-                );
-                session.set_dry_run(args.dry_run);
-                if !args.dry_run {
-                    session.test(localhost).map_err(|err| {
-                        format!("Failed to test set {name:?} in table 'leroy': {err}. Please create the table and set before running.")
-                    })?;
-                }
-                Ok(session)
+                    proto_family,
+                ))
             })?,
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
@@ -254,10 +219,3 @@ impl Leroy {
     }
 }
 
-impl Drop for Leroy {
-    fn drop(&mut self) {
-        // Flush any pending IPs before shutdown
-        let _ = self.sessions.ipv4.flush_on_shutdown();
-        let _ = self.sessions.ipv6.flush_on_shutdown();
-    }
-}

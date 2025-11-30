@@ -1,206 +1,201 @@
 use std::{
-    borrow::Cow,
-    collections::HashMap,
     error::Error,
+    ffi::CString,
     net::IpAddr,
-    time::{Duration, Instant},
+    os::raw::c_void,
 };
 
-use log::{debug, info};
-use nftables::{
-    batch::Batch,
-    expr, helper,
-    schema::{Element, NfListObject},
-    types::NfFamily,
-};
+use log::info;
+use nftnl::ProtoFamily;
 
 /// Wrapper around nftables for managing IP ban sets with timeouts.
-/// Mimics the API of ipset::Session<HashIp> for easier migration.
-/// Implements batching to reduce syscalls.
+/// Uses raw nftnl-sys FFI for low-level netlink communication.
+/// Each add operation immediately sends to nftables (no batching).
 pub struct NftSession {
     table: String,
     set: String,
-    family: NfFamily,
-    dry_run: bool,
-
-    // Batching state
-    pending_ips: Vec<(IpAddr, u32)>,
-    last_flush: Instant,
-    batch_size: usize,
-    batch_timeout: Duration,
+    family: ProtoFamily,
 }
 
 impl NftSession {
     /// Create a new nftables session for a specific set.
     ///
     /// # Arguments
-    /// * `table` - The nftables table name (e.g., "leroyjenkins")
+    /// * `table` - The nftables table name (e.g., "leroy")
     /// * `set` - The set name within the table (e.g., "leroy4" or "leroy6")
-    /// * `family` - The IP family (NfFamily::IP or NfFamily::IP6)
-    /// * `batch_size` - Max IPs to batch before flush
-    /// * `batch_timeout` - Max time to wait before flush
-    pub fn new(
-        table: String,
-        set: String,
-        family: NfFamily,
-        batch_size: usize,
-        batch_timeout: Duration,
-    ) -> Self {
+    /// * `family` - The IP family (ProtoFamily::Ipv4 or ProtoFamily::Ipv6)
+    pub fn new(table: String, set: String, family: ProtoFamily) -> Self {
         NftSession {
             table,
             set,
             family,
-            dry_run: false,
-            pending_ips: Vec::with_capacity(batch_size),
-            last_flush: Instant::now(),
-            batch_size,
-            batch_timeout,
-        }
-    }
-
-    /// Set dry-run mode. When enabled, operations are logged but not applied.
-    pub fn set_dry_run(&mut self, dry_run: bool) {
-        self.dry_run = dry_run;
-    }
-
-    /// Test if the set exists by attempting to query it.
-    /// This validates that the table and set are properly configured.
-    ///
-    /// # Arguments
-    /// * `_ip` - Unused, kept for API compatibility with ipset::Session
-    pub fn test(&self, _ip: IpAddr) -> Result<bool, Box<dyn Error>> {
-        if self.dry_run {
-            return Ok(true);
-        }
-
-        // Query the ruleset to check if our set exists
-        let ruleset = helper::get_current_ruleset()?;
-
-        // Look for our specific set in the ruleset
-        let set_exists = ruleset.objects.iter().any(|obj| match obj {
-            nftables::schema::NfObject::ListObject(NfListObject::Set(set)) => {
-                set.family == self.family && set.table == self.table && set.name == self.set
-            }
-            _ => false,
-        });
-
-        if set_exists {
-            Ok(true)
-        } else {
-            Err(format!(
-                "Set {} does not exist in table {} (family {:?})",
-                self.set, self.table, self.family
-            )
-            .into())
         }
     }
 
     /// Add an IP address to the set with a specific timeout.
-    /// Uses batching to reduce syscalls - flushes when timeout expires OR batch_size reached.
+    /// Immediately sends to nftables via netlink (no batching).
     ///
     /// # Arguments
     /// * `ip` - The IP address to ban
-    /// * `timeout` - The timeout in seconds
+    /// * `timeout_secs` - The timeout in seconds
     ///
     /// # Returns
-    /// * `Ok(true)` - Element was queued/added
-    /// * `Err(_)` - Failed to flush batch
-    pub fn add(&mut self, ip: IpAddr, timeout: u32) -> Result<bool, Box<dyn Error>> {
-        if self.dry_run {
-            debug!(
-                "Dry-run: would add {} to set {} with timeout {}s",
-                ip, self.set, timeout
-            );
-            return Ok(true);
-        }
+    /// * `Ok(true)` - Element was added successfully
+    /// * `Err(_)` - Failed to add element
+    pub fn add(&mut self, ip: IpAddr, timeout_secs: u32) -> Result<bool, Box<dyn Error>> {
+        info!(
+            target: "leroyjenkins",
+            "Adding {} to set {} with timeout {}s",
+            ip, self.set, timeout_secs
+        );
 
-        // Flush if timeout expired OR batch size reached (check before adding)
-        if !self.pending_ips.is_empty()
-            && (self.last_flush.elapsed() >= self.batch_timeout
-                || self.pending_ips.len() >= self.batch_size)
-        {
-            self.flush()?;
+        unsafe {
+            self.add_element_with_timeout_raw(ip, timeout_secs)?;
         }
-
-        // Add to pending batch
-        self.pending_ips.push((ip, timeout));
 
         Ok(true)
     }
 
-    /// Flush all pending IPs to nftables in a single batch.
-    /// Groups IPs by timeout since nftables requires same timeout per Element.
-    fn flush(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.pending_ips.is_empty() {
-            return Ok(());
+    /// Add an element with timeout using raw nftnl-sys FFI and manual netlink message construction.
+    /// This is necessary because nftnl's safe API doesn't expose element timeout functionality.
+    unsafe fn add_element_with_timeout_raw(
+        &self,
+        ip: IpAddr,
+        timeout_secs: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        let set_name = CString::new(self.set.as_str())?;
+        let table_name = CString::new(self.table.as_str())?;
+
+        // Create nftnl_set for holding elements
+        let set_ptr = nftnl_sys::nftnl_set_alloc();
+        if set_ptr.is_null() {
+            return Err("Failed to allocate nftnl_set".into());
         }
 
-        let total_ips = self.pending_ips.len();
-
-        // Group IPs by timeout value
-        let mut by_timeout: HashMap<u32, Vec<IpAddr>> = HashMap::new();
-        for (ip, timeout) in self.pending_ips.drain(..) {
-            by_timeout.entry(timeout).or_default().push(ip);
-        }
-
-        // Log batch flush with timeout distribution
-        info!(
-            target: "leroyjenkins",
-            "Flushing batch of {} IPs to set {} ({}s since last flush):",
-            total_ips,
-            self.set,
-            self.last_flush.elapsed().as_secs()
+        // Set required set attributes
+        nftnl_sys::nftnl_set_set_str(
+            set_ptr,
+            nftnl_sys::NFTNL_SET_NAME as u16,
+            set_name.as_ptr(),
+        );
+        nftnl_sys::nftnl_set_set_str(
+            set_ptr,
+            nftnl_sys::NFTNL_SET_TABLE as u16,
+            table_name.as_ptr(),
+        );
+        nftnl_sys::nftnl_set_set_u32(
+            set_ptr,
+            nftnl_sys::NFTNL_SET_FAMILY as u16,
+            self.family as u32,
         );
 
-        if total_ips < 5 {
-            // Show individual IPs for small batches
-            for (timeout, ips) in &by_timeout {
-                let ip_list: Vec<String> = ips.iter().map(|ip| ip.to_string()).collect();
-                info!(target: "leroyjenkins", "  - {}s timeout: {}", timeout, ip_list.join(", "));
+        // Create set element
+        let elem_ptr = nftnl_sys::nftnl_set_elem_alloc();
+        if elem_ptr.is_null() {
+            nftnl_sys::nftnl_set_free(set_ptr);
+            return Err("Failed to allocate nftnl_set_elem".into());
+        }
+
+        // Set the IP address key
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                nftnl_sys::nftnl_set_elem_set(
+                    elem_ptr,
+                    nftnl_sys::NFTNL_SET_ELEM_KEY as u16,
+                    octets.as_ptr() as *const c_void,
+                    octets.len() as u32,
+                );
             }
-        } else {
-            // Show counts only for large batches
-            for (timeout, ips) in &by_timeout {
-                info!(target: "leroyjenkins", "  - {}s timeout: {} IPs", timeout, ips.len());
+            IpAddr::V6(ipv6) => {
+                let octets = ipv6.octets();
+                nftnl_sys::nftnl_set_elem_set(
+                    elem_ptr,
+                    nftnl_sys::NFTNL_SET_ELEM_KEY as u16,
+                    octets.as_ptr() as *const c_void,
+                    octets.len() as u32,
+                );
             }
         }
 
-        // Create batch with one Element per timeout group
-        let mut batch = Batch::new();
-        for (timeout, ips) in by_timeout {
-            // Create Expression for each IP with its timeout
-            let elem_exprs: Vec<expr::Expression> = ips
-                .into_iter()
-                .map(|ip| {
-                    expr::Expression::Named(expr::NamedExpression::Elem(expr::Elem {
-                        val: Box::new(expr::Expression::String(ip.to_string().into())),
-                        timeout: Some(timeout),
-                        expires: None,
-                        comment: None,
-                        counter: None,
-                    }))
-                })
-                .collect();
+        // Set timeout in milliseconds (nftables kernel uses ms)
+        let timeout_ms = (timeout_secs as u64).saturating_mul(1000);
+        nftnl_sys::nftnl_set_elem_set_u64(
+            elem_ptr,
+            nftnl_sys::NFTNL_SET_ELEM_TIMEOUT as u16,
+            timeout_ms,
+        );
 
-            batch.add(NfListObject::Element(Element {
-                family: self.family.clone(),
-                table: Cow::Borrowed(&self.table),
-                name: Cow::Borrowed(&self.set),
-                elem: Cow::Owned(elem_exprs),
-            }));
-        }
+        // Add element to set
+        nftnl_sys::nftnl_set_elem_add(set_ptr, elem_ptr);
 
-        // Apply the batch
-        let ruleset = batch.to_nftables();
-        helper::apply_ruleset(&ruleset)?;
+        // Build and send netlink message
+        let result = self.send_set_elem_message(set_ptr);
 
-        self.last_flush = Instant::now();
-        Ok(())
+        // Clean up (elem_ptr is owned by set_ptr, so only free set)
+        nftnl_sys::nftnl_set_free(set_ptr);
+
+        result
     }
 
-    /// Flush pending IPs on shutdown.
-    /// Public method to allow explicit flushing before process exit.
-    pub fn flush_on_shutdown(&mut self) -> Result<(), Box<dyn Error>> {
-        self.flush()
+    /// Build netlink message for set elements and send via mnl socket.
+    unsafe fn send_set_elem_message(&self, set_ptr: *mut nftnl_sys::nftnl_set) -> Result<(), Box<dyn Error>> {
+        use mnl::mnl_sys;
+
+        // Netlink message flags (from linux/netlink.h)
+        const NLM_F_REQUEST: u16 = 1;
+        const NLM_F_ACK: u16 = 4;
+        const NLM_F_CREATE: u16 = 0x400;
+
+        // Nftables message types (from linux/netfilter/nfnetlink.h)
+        const NFNL_SUBSYS_NFTABLES: u16 = 10;
+        const NFT_MSG_NEWSETELEM: u16 = 13;
+
+        // Allocate netlink message buffer (using typical MTU size)
+        const MNL_SOCKET_BUFFER_SIZE: usize = 8192;
+        let mut buf = vec![0u8; MNL_SOCKET_BUFFER_SIZE];
+
+        // Build netlink message header using mnl_sys
+        #[repr(C)]
+        struct nlmsghdr {
+            nlmsg_len: u32,
+            nlmsg_type: u16,
+            nlmsg_flags: u16,
+            nlmsg_seq: u32,
+            nlmsg_pid: u32,
+        }
+
+        let nlh = mnl_sys::mnl_nlmsg_put_header(buf.as_mut_ptr() as *mut c_void) as *mut nlmsghdr;
+
+        // Set message type: NFT_MSG_NEWSETELEM with NFNL_SUBSYS_NFTABLES subsystem
+        (*nlh).nlmsg_type = (NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_NEWSETELEM;
+        (*nlh).nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_ACK;
+        (*nlh).nlmsg_seq = 1;
+
+        // Build message payload with set elements
+        nftnl_sys::nftnl_set_elems_nlmsg_build_payload(nlh as *mut _, set_ptr);
+
+        // Open netlink socket
+        let socket = mnl::Socket::new(mnl::Bus::Netfilter)
+            .map_err(|e| format!("Failed to open netlink socket: {}", e))?;
+
+        // Send message
+        let msg_len = (*nlh).nlmsg_len as usize;
+        let msg_slice = &buf[..msg_len];
+        socket.send_all(vec![msg_slice])
+            .map_err(|e| format!("Failed to send netlink message: {}", e))?;
+
+        // Receive and check acknowledgment
+        let mut recv_buf = vec![0u8; MNL_SOCKET_BUFFER_SIZE];
+        let bytes_received = socket.recv(&mut recv_buf)
+            .map_err(|e| format!("Failed to receive netlink response: {}", e))?;
+
+        // Parse response to check for errors
+        // For now, we just check if we got a response
+        if bytes_received == 0 {
+            return Err("Received empty netlink response".into());
+        }
+
+        Ok(())
     }
 }

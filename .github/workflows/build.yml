@@ -2,7 +2,7 @@ name: Build Debian Releases
 
 on:
   push:
-    branches: [main]
+    branches: [main, nftnl-rs]
     tags: ['v*']
   workflow_dispatch:
 
@@ -21,8 +21,8 @@ jobs:
             curl \
             build-essential \
             pkg-config \
-            libipset-dev \
-            libnftables-dev \
+            libnftnl-dev \
+            libmnl-dev \
             git
 
       - name: Checkout code
