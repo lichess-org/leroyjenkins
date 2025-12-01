@@ -101,13 +101,22 @@ impl NftSession {
 
     /// Send a finalized batch to netfilter via netlink socket.
     fn send_batch(&mut self, batch: &nftnl::FinalizedBatch) -> Result<(), Box<dyn Error>> {
-        let mut recv_buf = vec![0u8; nftnl::nft_nlmsg_maxsize() as usize];
+        let portid = self.socket.portid();
 
-        for msg in batch.iter() {
-            self.socket.send_all(vec![msg])?;
+        // Send entire batch at once
+        self.socket.send_all(batch)?;
 
-            // Receive ACK for each message
-            let _bytes = self.socket.recv(&mut recv_buf)?;
+        let mut buffer = vec![0u8; nftnl::nft_nlmsg_maxsize() as usize];
+        let mut expected_seqs = batch.sequence_numbers();
+
+        // Process acknowledgment messages from netfilter
+        while !expected_seqs.is_empty() {
+            for message in self.socket.recv(&mut buffer[..])? {
+                let message = message?;
+                let expected_seq = expected_seqs.next().expect("Unexpected ACK");
+                // Validate sequence number and check for error messages
+                mnl::cb_run(message, expected_seq, portid)?;
+            }
         }
 
         Ok(())
