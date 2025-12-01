@@ -22,7 +22,6 @@ log = "0.4"
 pretty_env_logger = "0.5"
 clap = { version = "4.4.2", features = ["derive"] }
 nftnl = { git = "https://github.com/lichess-org/nftnl-rs", branch = "add-set-elem-timeout"}
-nftnl-sys = { git = "https://github.com/lichess-org/nftnl-rs", branch = "add-set-elem-timeout"}
 mnl = "0.2"
 governor = "0.6.0"
 humantime = "2.1.0"

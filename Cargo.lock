@@ -590,7 +590,6 @@ dependencies = [
  "mini-moka",
  "mnl",
  "nftnl",
- "nftnl-sys",
  "pretty_env_logger",
  "rustc-hash",
 ]
