@@ -685,7 +685,7 @@ dependencies = [
 [[package]]
 name = "nftnl"
 version = "0.9.0"
-source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#066cb954ddd76bb1c8f8eae1a7ed17f418a62789"
+source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#49cfe5e9bfee10697a9ddf98fc449d010c10e95c"
 dependencies = [
  "bitflags",
  "log",
@@ -695,7 +695,7 @@ dependencies = [
 [[package]]
 name = "nftnl-sys"
 version = "0.6.4"
-source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#066cb954ddd76bb1c8f8eae1a7ed17f418a62789"
+source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#49cfe5e9bfee10697a9ddf98fc449d010c10e95c"
 dependencies = [
  "cfg-if",
  "libc",

@@ -59,13 +59,10 @@ impl NftSession {
         let mut batch = Batch::new();
 
         // Add element based on IP version
-        // Note: Using Set::new() with dummy id 0. The ANONYMOUS/CONSTANT flags don't
-        // matter since we only send elements (NFT_MSG_NEWSETELEM), not set definition.
         match ip {
             IpAddr::V4(ipv4) => {
-                let mut set = Set::<Ipv4Addr>::new(
+                let mut set = Set::<Ipv4Addr>::new_existing(
                     &self.set_name,
-                    0,
                     &table,
                     self.family,
                 );
@@ -77,9 +74,8 @@ impl NftSession {
                 }
             }
             IpAddr::V6(ipv6) => {
-                let mut set = Set::<Ipv6Addr>::new(
+                let mut set = Set::<Ipv6Addr>::new_existing(
                     &self.set_name,
-                    0,
                     &table,
                     self.family,
                 );
