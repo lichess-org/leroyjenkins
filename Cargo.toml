@@ -21,8 +21,8 @@ mini-moka = "0.10.2"
 log = "0.4"
 pretty_env_logger = "0.5"
 clap = { version = "4.4.2", features = ["derive"] }
-nftnl = "0.7"
-nftnl-sys = "0.6"
+nftnl = { git = "https://github.com/lichess-org/nftnl-rs/nftnl", branch = "add-set-elem-timeout"}
+nftnl-sys = { git = "https://github.com/lichess-org/nftnl-rs/nftnl-sys", branch = "add-set-elem-timeout"}
 mnl = "0.2"
 governor = "0.6.0"
 humantime = "2.1.0"
