@@ -59,12 +59,14 @@ impl NftSession {
         let mut batch = Batch::new();
 
         // Add element based on IP version
+        // Note: For inet tables, use specific IP family (Ipv4/Ipv6) for set operations,
+        // not Inet, as the netlink message family must match the element address type
         match ip {
             IpAddr::V4(ipv4) => {
                 let mut set = Set::<Ipv4Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    self.family,
+                    ProtoFamily::Ipv4,
                 );
                 set.add_with_timeout(&ipv4, Some(timeout_ms));
 
@@ -77,7 +79,7 @@ impl NftSession {
                 let mut set = Set::<Ipv6Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    self.family,
+                    ProtoFamily::Ipv6,
                 );
                 set.add_with_timeout(&ipv6, Some(timeout_ms));
 
@@ -99,6 +101,13 @@ impl NftSession {
     fn send_batch(&mut self, batch: &nftnl::FinalizedBatch) -> Result<(), Box<dyn Error>> {
         let portid = self.socket.portid();
 
+        log::debug!(
+            "Sending batch to netfilter: portid={}, table={}, set={}",
+            portid,
+            self.table_name.to_string_lossy(),
+            self.set_name.to_string_lossy()
+        );
+
         // Send entire batch at once
         self.socket.send_all(batch)?;
 
@@ -111,7 +120,16 @@ impl NftSession {
                 let message = message?;
                 let expected_seq = expected_seqs.next().expect("Unexpected ACK");
                 // Validate sequence number and check for error messages
-                mnl::cb_run(message, expected_seq, portid)?;
+                if let Err(e) = mnl::cb_run(message, expected_seq, portid) {
+                    log::error!(
+                        "Netlink error for table={}, set={}, family={:?}: {}",
+                        self.table_name.to_string_lossy(),
+                        self.set_name.to_string_lossy(),
+                        self.family,
+                        e
+                    );
+                    return Err(e.into());
+                }
             }
         }
 
