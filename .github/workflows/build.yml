@@ -43,19 +43,23 @@ jobs:
             ${{ runner.os }}-cargo-${{ matrix.debian }}-
             ${{ runner.os }}-cargo-
 
-      - name: Build release binary
-        run: cargo build --release
+      - name: Build release binaries
+        run: cargo build --release --bin leroyjenkins --bin debug_nft
 
-      - name: Verify binary
+      - name: Verify binaries
         run: |
           ./target/release/leroyjenkins --version
           ldd target/release/leroyjenkins
+          ls -lh target/release/debug_nft
+          ldd target/release/debug_nft
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: leroyjenkins-debian-${{ matrix.debian }}
-          path: target/release/leroyjenkins
+          path: |
+            target/release/leroyjenkins
+            target/release/debug_nft
           retention-days: 90
 
   release:
@@ -68,17 +72,26 @@ jobs:
       - name: Download Bookworm artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: leroyjenkins-debian-bookworm
-          merge-multiple: true
+          name: leroyjenkins-debian-bookworm
+          path: bookworm
 
       - name: Download Trixie artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: leroyjenkins-debian-trixie
-          merge-multiple: true
+          name: leroyjenkins-debian-trixie
+          path: trixie
+
+      - name: Organize release files
+        run: |
+          mv bookworm/leroyjenkins leroyjenkins-debian-bookworm
+          mv bookworm/debug_nft debug_nft-debian-bookworm
+          mv trixie/leroyjenkins leroyjenkins-debian-trixie
+          mv trixie/debug_nft debug_nft-debian-trixie
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: leroyjenkins-debian-*
+          files: |
+            leroyjenkins-debian-*
+            debug_nft-debian-*
           fail_on_unmatched_files: true
