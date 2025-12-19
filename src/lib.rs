@@ -62,11 +62,11 @@ pub struct Args {
     #[arg(long, value_parser = parse_duration)]
     pub ipset_base_time: Duration,
 
-    /// The name of the ipset for IPv4.
+    /// The name of the ipset for IPv4 (in inet table).
     #[arg(long)]
     pub ipset_ipv4_name: String,
 
-    /// The name of the ipset for IPv6.
+    /// The name of the ipset for IPv6 (in inet table).
     #[arg(long)]
     pub ipset_ipv6_name: String,
 
@@ -127,14 +127,14 @@ impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         Ok(Leroy {
             sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
-                let (name, proto_family) = match family {
-                    IpFamily::V4 => (&args.ipset_ipv4_name, ProtoFamily::Ipv4),
-                    IpFamily::V6 => (&args.ipset_ipv6_name, ProtoFamily::Ipv6),
+                let name = match family {
+                    IpFamily::V4 => &args.ipset_ipv4_name,
+                    IpFamily::V6 => &args.ipset_ipv6_name,
                 };
                 NftSession::new(
                     "leroy".to_string(),
                     name.clone(),
-                    proto_family,
+                    ProtoFamily::Inet,
                 )
             })?,
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {

@@ -20,7 +20,6 @@ fn make_leroy() -> Leroy {
             reporting_ban_time_period: Duration::from_secs(1),
             cache_initial_capacity: 100000,
             cache_max_size: 500000,
-            dry_run: true,
         })
         .unwrap(),
     )
