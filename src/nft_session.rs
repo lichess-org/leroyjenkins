@@ -59,14 +59,14 @@ impl NftSession {
         let mut batch = Batch::new();
 
         // Add element based on IP version
-        // Note: For inet tables, use specific IP family (Ipv4/Ipv6) for set operations,
-        // not Inet, as the netlink message family must match the element address type
+        // Note: For inet tables, use table's family (Inet) for set operations.
+        // The Set type parameter (Ipv4Addr/Ipv6Addr) determines element type.
         match ip {
             IpAddr::V4(ipv4) => {
                 let mut set = Set::<Ipv4Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    ProtoFamily::Ipv4,
+                    self.family,  // Use table's family (Inet)
                 );
                 set.add_with_timeout(&ipv4, Some(timeout_ms));
 
@@ -79,7 +79,7 @@ impl NftSession {
                 let mut set = Set::<Ipv6Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    ProtoFamily::Ipv6,
+                    self.family,  // Use table's family (Inet)
                 );
                 set.add_with_timeout(&ipv6, Some(timeout_ms));
 
