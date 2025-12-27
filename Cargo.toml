@@ -31,14 +31,6 @@ mimalloc = "0.1.39"
 [dev-dependencies]
 criterion = "0.5.1"
 
-[[bin]]
-name = "leroyjenkins"
-bench = false
-
-[[bin]]
-name = "debug_nft"
-bench = false # Use criterion harness
-
 [[bench]]
 name = "benches"
 harness = false

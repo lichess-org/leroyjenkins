@@ -14,6 +14,7 @@ fn make_leroy() -> Leroy {
             bl_period: Duration::from_secs(5),
             ipset_base_time: Duration::from_secs(30),
             ipset_ban_ttl: Duration::from_secs(60 * 60),
+            table: c"leroy".to_owned(),
             ipset_ipv4_name: "leroy4".to_owned(),
             ipset_ipv6_name: "leroy6".to_owned(),
             reporting_ip_time_period: Duration::from_secs(1),
