@@ -108,9 +108,8 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 
 pub struct Leroy {
     socket: Option<mnl::Socket>,
-    nlmsg_send_buffer: Vec<u8>,
+    nlmsg_batch: NlmsgBatch,
     nlmsg_recv_buffer: Vec<u8>,
-    seq: Seq,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
@@ -128,9 +127,8 @@ impl Leroy {
             socket: (!args.dry_run)
                 .then(|| mnl::Socket::new(mnl::Bus::Netfilter))
                 .transpose()?,
-            nlmsg_send_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
+            nlmsg_batch: NlmsgBatch::new(Seq(0)),
             nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
-            seq: Seq(0),
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
@@ -215,35 +213,34 @@ impl Leroy {
         elem.set_timeout(timeout);
         set.add(elem);
 
-        let mut batch = NlmsgBatch::new(&mut self.nlmsg_send_buffer, self.seq);
-        batch.reset();
-        batch.begin();
+        self.nlmsg_batch.reset();
+        self.nlmsg_batch.begin();
         // Ensure following delete succeeds unconditionally.
-        batch.set_elems(
+        self.nlmsg_batch.set_elems(
             NFT_MSG_NEWSETELEM as u16,
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST) as u16,
             &set,
         );
         // Delete to reset timeout if element already exists.
-        batch.set_elems(
+        self.nlmsg_batch.set_elems(
             NFT_MSG_DELSETELEM as u16,
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST) as u16,
             &set,
         );
         // Add element with new timeout.
-        batch.set_elems(
+        self.nlmsg_batch.set_elems(
             NFT_MSG_NEWSETELEM as u16,
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST | NLM_F_ACK) as u16,
             &set,
         );
-        self.seq = batch.seq();
-        batch.end();
+        let seq = self.nlmsg_batch.seq();
+        self.nlmsg_batch.end();
 
         if let Some(socket) = &mut self.socket {
-            let bytes = batch.as_bytes();
+            let bytes = self.nlmsg_batch.as_bytes();
             let tx = socket.send(bytes)?;
             if tx != bytes.len() {
                 return Err(io::Error::new(
@@ -254,7 +251,7 @@ impl Leroy {
 
             for response in socket.recv(&mut self.nlmsg_recv_buffer[..])? {
                 let response = response?;
-                mnl::cb_run(response, self.seq.0, socket.portid())?;
+                mnl::cb_run(response, seq.0, socket.portid())?;
             }
         }
 

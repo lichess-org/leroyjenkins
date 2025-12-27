@@ -1,6 +1,5 @@
 use std::{
     ffi::{c_char, c_void, CStr},
-    marker::PhantomData,
     mem,
     net::IpAddr,
     ptr::NonNull,
@@ -11,6 +10,7 @@ use std::{
 use mnl_sys::{
     mnl_nlmsg_batch, mnl_nlmsg_batch_current, mnl_nlmsg_batch_head, mnl_nlmsg_batch_next,
     mnl_nlmsg_batch_reset, mnl_nlmsg_batch_size, mnl_nlmsg_batch_start, mnl_nlmsg_batch_stop,
+    MNL_SOCKET_BUFFER_SIZE,
 };
 use nftnl_sys::{
     nftnl_batch_begin, nftnl_batch_end, nftnl_nlmsg_build_hdr, nftnl_set, nftnl_set_alloc,
@@ -135,24 +135,24 @@ impl Seq {
     }
 }
 
-pub struct NlmsgBatch<'a> {
+pub struct NlmsgBatch {
+    _buffer: Vec<u8>,
     batch: NonNull<mnl_nlmsg_batch>,
     seq: Seq,
-    _marker: PhantomData<&'a [u8]>,
 }
 
-impl<'a> NlmsgBatch<'a> {
-    pub fn new(buffer: &mut [u8], seq: Seq) -> NlmsgBatch<'_> {
+impl NlmsgBatch {
+    pub fn new(seq: Seq) -> NlmsgBatch {
+        let mut buffer = vec![0; MNL_SOCKET_BUFFER_SIZE() as usize];
+        let batch = NonNull::new(unsafe {
+            mnl_nlmsg_batch_start(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
+        })
+        .expect("mnl_nlmsg_batch_start");
+
         NlmsgBatch {
-            batch: unsafe {
-                NonNull::new(mnl_nlmsg_batch_start(
-                    buffer.as_mut_ptr().cast::<c_void>(),
-                    buffer.len(),
-                ))
-                .expect("mnl_nlmsg_batch_start")
-            },
+            _buffer: buffer,
+            batch,
             seq,
-            _marker: PhantomData,
         }
     }
 
@@ -211,7 +211,7 @@ impl<'a> NlmsgBatch<'a> {
         }
     }
 
-    pub fn as_bytes(&self) -> &'a [u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         unsafe {
             slice::from_raw_parts(
                 mnl_nlmsg_batch_head(self.batch.as_ptr()).cast::<u8>(),
@@ -225,7 +225,7 @@ impl<'a> NlmsgBatch<'a> {
     }
 }
 
-impl Drop for NlmsgBatch<'_> {
+impl Drop for NlmsgBatch {
     fn drop(&mut self) {
         unsafe {
             mnl_nlmsg_batch_stop(self.batch.as_ptr());
