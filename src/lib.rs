@@ -156,8 +156,9 @@ impl Leroy {
             args,
         };
 
-        leroy.ban(IpAddr::V4(Ipv4Addr::LOCALHOST))?;
-        leroy.ban(IpAddr::V6(Ipv6Addr::LOCALHOST))?;
+        // Ban some reserved IPs to test configuration and kernel communication.
+        leroy.ban(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))?;
+        leroy.ban(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))?;
 
         Ok(leroy)
     }
