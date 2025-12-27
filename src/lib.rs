@@ -46,13 +46,13 @@ pub struct Args {
     /// Everytime we :hammer-time: them, it will reset this countdown.
     /// The user must avoid an ipset ban for this long before their
     /// previous bans are forgotten.
-    #[arg(long, alias = "ban-ttl", value_parser = parse_duration)]
-    pub ipset_ban_ttl: Duration,
+    #[arg(long, alias = "ipset-ban-ttl", value_parser = parse_duration)]
+    pub ban_ttl: Duration,
 
     /// The time of the first ban. Each subsequent ban will be increased
     /// linearly by this amount (resulting in `--ipset-base-time` * ban count).
-    #[arg(long, alias = "base-time", value_parser = parse_duration)]
-    pub ipset_base_time: Duration,
+    #[arg(long, alias = "ipset-base-time", value_parser = parse_duration)]
+    pub ban_base_time: Duration,
 
     /// The name of the nftables table. Protocol family must be `inet`.
     #[arg(long, default_value = "leroy")]
@@ -60,18 +60,16 @@ pub struct Args {
 
     /// The name of the ipset for IPv4 (must be in `--table` with type
     /// `ipv4_addr` and flags exactly `timeout`).
-    #[arg(long, alias = "ipv4-set", default_value = "leroy4")]
-    pub ipset_ipv4_name: CString,
+    #[arg(long, alias = "ipset-ipv4-name", default_value = "leroy4")]
+    pub ipv4_set: CString,
 
     /// The name of the ipset for IPv6 (must be in `--table` with type
     /// `ipv6_addr` and flags exactly `timeout`).
-    #[arg(long, alias = "ipv6-set", default_value = "leroy6")]
-    pub ipset_ipv6_name: CString,
+    #[arg(long, alias = "ipset-ipv6-name", default_value = "leroy6")]
+    pub ipv6_set: CString,
 
-    /// The number of seconds to accumulate ban counts before reporting and
-    /// resetting.
-    #[arg(long, default_value = "10s", value_parser = parse_duration)]
-    pub reporting_ban_time_period: Duration,
+    #[arg(long, alias = "reporting-ban-time-period", default_value = "10s", value_parser = parse_duration)]
+    pub _reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
@@ -96,7 +94,7 @@ pub struct Args {
 
 impl Args {
     fn time_to_ban(&self, ban_count: u32) -> Duration {
-        self.ipset_base_time
+        self.ban_base_time
             .checked_mul(ban_count)
             .unwrap_or(Duration::MAX)
     }
@@ -112,7 +110,7 @@ pub struct Leroy {
     nlmsg_recv_buffer: Vec<u8>,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
-    ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
+    ban_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -139,15 +137,15 @@ impl Leroy {
                 )),
                 None => None, // ban on sight
             },
-            ipset_cache: Cache::builder()
+            ban_cache: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.ipset_base_time.saturating_sub(Duration::from_secs(1)))
+                .time_to_live(args.ban_base_time.saturating_sub(Duration::from_secs(1)))
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.ipset_ban_ttl)
+                .time_to_live(args.ban_ttl)
                 .build_with_hasher(Default::default()),
             line_count: 0,
             line_count_start: Instant::now(),
@@ -155,9 +153,11 @@ impl Leroy {
         };
 
         // Ban some reserved IPs to test configuration and kernel communication.
+        info!("Testing bans ...");
         leroy.ban(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))?;
         leroy.ban(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))?;
 
+        info!("Ready");
         Ok(leroy)
     }
 
@@ -193,7 +193,7 @@ impl Leroy {
     }
 
     fn ban(&mut self, ip: IpAddr) -> io::Result<()> {
-        if self.ipset_cache.contains_key(&ip) {
+        if self.ban_cache.contains_key(&ip) {
             debug!("{ip} already banned");
             return Ok(());
         }
@@ -204,8 +204,8 @@ impl Leroy {
         let mut set = NftnlSet::new();
         set.set_table(&self.args.table);
         set.set_name(match ip {
-            IpAddr::V4(_) => &self.args.ipset_ipv4_name,
-            IpAddr::V6(_) => &self.args.ipset_ipv6_name,
+            IpAddr::V4(_) => &self.args.ipv4_set,
+            IpAddr::V6(_) => &self.args.ipv6_set,
         });
 
         let mut elem = NftnlSetElem::new();
@@ -252,7 +252,7 @@ impl Leroy {
             }
         }
 
-        self.ipset_cache.insert(ip, ());
+        self.ban_cache.insert(ip, ());
         self.recidivism_counts.insert(ip, recidivism);
 
         Ok(())

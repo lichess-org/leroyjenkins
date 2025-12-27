@@ -43,28 +43,20 @@ This project requires Rust nightly for the `addr_parse_ascii` feature.
 
 **src/lib.rs**: Contains the main `Leroy` struct and business logic:
 - **Rate limiting**: Uses `KeyedLimiter` wrapper around `governor` crate to track IPs and apply rate limits based on `--bl-threshold` and `--bl-period`
-- **Nftables management**: Maintains separate nftables sessions for IPv4/IPv6 via `ByIpFamily<NftSession>`
+- **Nftables management**: Holds `mnl::Socket` to communicate with the kernel
 - **Recidivism tracking**: Two caches using `mini-moka`:
-  - `ipset_cache`: Short-lived cache to prevent duplicate nftables adds (TTL: `ipset_base_time` - 1s)
-  - `recidivism_counts`: Long-lived cache tracking how many times an IP has been banned (TTL: `ipset_ban_ttl`)
-- **Progressive banning**: Ban duration = ipset_base_time × recidivism_count (linear escalation)
-
-**src/nft_session.rs**: Wrapper around nftables for managing ban sets:
-- **NftSession**: Mimics ipset::Session API for easier migration from rust-ipset
-- **Batch operations**: Uses nftables batch API to add elements with individual timeouts
-- **Set validation**: Queries ruleset on startup to ensure table and sets exist
-- **Dry-run support**: Can skip apply_ruleset for testing without privileges
+  - `ban_cache`: Short-lived cache to prevent duplicate nftables adds (TTL: `ban_base_time` - 1s)
+  - `recidivism_counts`: Long-lived cache tracking how many times an IP has been banned (TTL: `ban_ttl`)
+- **Progressive banning**: Ban duration = `--ban-base-time` × recidivism_count (linear escalation)
 
 **src/keyed_limiter.rs**: Custom unsync (single-threaded) implementation of a keyed rate limiter using `governor`. Includes automatic garbage collection that triggers when the internal HashMap reaches a threshold, removing stale entries.
-
-**src/ip_family.rs**: Helpers IPv4/IPv6 dual-stack operations. The `ByIpFamily<T>` struct holds separate instances for each protocol family.
 
 ### Design Decisions
 
 **Stdin-based**: Designed to work in Unix pipelines with tools like `tail -F`, `awk`, `grep`, enabling flexible log parsing without hard-coding log formats.
 
 **Caching strategy:**
-- `ipset_cache` prevents redundant nftables operations (nftables already tracks this, but cache avoids syscalls)
+- `ban_cache` prevents redundant nftables operations (nftables already tracks this, but cache avoids syscalls)
 - `recidivism_counts` implements the "ban longer each time" logic (state is forgotten when Leroy restarts)
 
 **Performance optimizations:**
@@ -77,13 +69,14 @@ This project requires Rust nightly for the `addr_parse_ascii` feature.
 ## Common CLI Arguments
 
 ```
---bl-threshold=100          # Events before ban (use 0 for ban-on-sight)
---bl-period=1m              # Time window for threshold
---ipset-base-time=100s      # First ban duration
---ipset-ban-ttl=1d          # How long to remember recidivism
---ipset-ipv4-name=leroy4    # IPv4 set name in nftables (must exist)
---ipset-ipv6-name=leroy6    # IPv6 set name in nftables (must exist)
---dry-run                   # Test without touching nftables
+--bl-threshold=100   # Events before ban (use 0 for ban-on-sight)
+--bl-period=1m       # Time window for threshold
+--ban-base-time=100s # First ban duration
+--ban-ttl=1d         # How long to remember recidivism
+--table=leroy        # Name of table in nftables (must exist with protocol family inet)
+--ipv4-set=leroy4    # IPv4 set name in nftables (must exist)
+--ipv6-set=leroy6    # IPv6 set name in nftables (must exist)
+--dry-run            # Test without touching nftables
 ```
 
 The nftables table `leroyjenkins` and sets must be created before running (unless using `--dry-run`). The tool will verify they exist on startup.
