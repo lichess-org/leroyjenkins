@@ -95,6 +95,12 @@ nft add set inet leroy leroy4 '{ type ipv4_addr; flags timeout; }'
 nft add set inet leroy leroy6 '{ type ipv6_addr; flags timeout; }'
 ```
 
+Check state of the table and contents of the sets:
+
+```sh
+nft list table inet leroy
+```
+
 ## Important dependencies
 
 - `nftnl-sys` and `mnl-sys`: Rust bindings for libnftnl and libmnl, to communicate with nftables
