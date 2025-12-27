@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (https://claude.ai/code) when working
 
 - When reporting information to me, be extremely concise and sacrifice
   grammar for the sake of concision.
-- All tests should pass and benchmarks should at least compile.
+- To finalize a set of changes, ensure all tests pass and benchmarks runs.
+  Format code.
 
 ## Project Overview
 
