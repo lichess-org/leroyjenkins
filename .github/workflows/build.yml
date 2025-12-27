@@ -22,44 +22,23 @@ jobs:
             libnftnl-dev \
             libmnl-dev \
             git
-
       - name: Checkout code
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v6
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ matrix.debian }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.debian }}-
-            ${{ runner.os }}-cargo-
-
       - name: Build release binaries
-        run: cargo build --release --bin leroyjenkins --bin debug_nft
-
+        run: cargo build --release
       - name: Verify binaries
         run: |
-          ./target/release/leroyjenkins --version
           ldd target/release/leroyjenkins
-          ls -lh target/release/debug_nft
-          ldd target/release/debug_nft
-
+          ./target/release/leroyjenkins --version
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: leroyjenkins-debian-${{ matrix.debian }}
           path: |
             target/release/leroyjenkins
-            target/release/debug_nft
           retention-days: 90
-
   release:
     needs: build-debian
     if: startsWith(github.ref, 'refs/tags/v')
@@ -68,28 +47,22 @@ jobs:
       contents: write
     steps:
       - name: Download Bookworm artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: leroyjenkins-debian-bookworm
           path: bookworm
-
       - name: Download Trixie artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: leroyjenkins-debian-trixie
           path: trixie
-
       - name: Organize release files
         run: |
           mv bookworm/leroyjenkins leroyjenkins-debian-bookworm
-          mv bookworm/debug_nft debug_nft-debian-bookworm
           mv trixie/leroyjenkins leroyjenkins-debian-trixie
-          mv trixie/debug_nft debug_nft-debian-trixie
-
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             leroyjenkins-debian-*
-            debug_nft-debian-*
           fail_on_unmatched_files: true
