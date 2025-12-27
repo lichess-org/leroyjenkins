@@ -2,6 +2,21 @@
 
 Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_QD4a4) amongst [too much planning and inaction](https://www.youtube.com/watch?v=km5FAAQLUT8)
 
+## Usage
+
+*leroyjenkins* reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will be added to the nftables set with the specified timeout.
+
+```sh
+tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ban-base-time=100s --ban-ttl=1d --table=leroy --ipv6-set=leroy6 --ipv4-set=leroy4
+```
+
+> [!WARNING]
+> *leroyjenkins* itself does nothing to your firewall rules. Use nftables rules similar to the ones below.
+
+> [!NOTE]
+> Must be run with enough privileges to actually modify nftables sets. Otherwise fails with a generic:
+> `Error: Os { code: 71, kind: Uncategorized, message: "Protocol error" }`
+
 ## Building
 
 ```sh
@@ -60,21 +75,6 @@ table inet leroy {
     }
 }
 ```
-
-## Usage
-
-*leroyjenkins* reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will be added to the nftables set with the specified timeout.
-
-```sh
-tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ban-base-time=100s --ban-ttl=1d --table=leroy --ipv6-set=leroy6 --ipv4-set=leroy4
-```
-
-> [!WARNING]
-> *leroyjenkins* itself does nothing to your firewall rules. Use nftables rules similar to the ones above.
-
-> [!NOTE]
-> Must be run with enough privileges to actually modify nftables sets. Otherwise fails with a generic:
-> `Error: Os { code: 71, kind: Uncategorized, message: "Protocol error" }`
 
 ## Examples
 
