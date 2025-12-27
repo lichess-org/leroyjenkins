@@ -1,12 +1,14 @@
 #![feature(addr_parse_ascii)]
+#![feature(ip_as_octets)]
 
-mod ip_family;
 mod keyed_limiter;
-mod nft_session;
+mod nftnl;
 
 use std::{
     error::Error,
+    ffi::CString,
     hash::BuildHasherDefault,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
     time::{Duration, Instant},
@@ -14,32 +16,28 @@ use std::{
 
 use clap::Parser;
 use governor::Quota;
+use libc::{
+    NFPROTO_INET, NFT_MSG_DELSETELEM, NFT_MSG_NEWSETELEM, NLM_F_ACK, NLM_F_CREATE, NLM_F_REQUEST,
+};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
-use nftables::types::NfFamily;
+use mnl_sys::MNL_SOCKET_BUFFER_SIZE;
 use rustc_hash::FxHasher;
 
 use crate::{
-    ip_family::{ByIpFamily, IpFamily},
     keyed_limiter::KeyedLimiter,
-    nft_session::NftSession,
+    nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch, Seq},
 };
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// The number of events that has to be exceeded before a ban decision.
-    /// Combines with `bl_period` to determine the exact rate limit.
-    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
+    /// The budget of events that has to be exceeded before a ban decision.
+    /// Replenished over `--bl-period`.
     #[arg(long)]
     pub bl_threshold: u32,
 
     /// The amount of time before the rate limiter is fully replenished.
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    ///
-    /// Combines with `bl_threshold` to determine the exact rate limit
-    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long, default_value = "0s", value_parser = parse_duration)]
     pub bl_period: Duration,
 
@@ -47,47 +45,39 @@ pub struct Args {
     /// This reperesents the amount of time we'll keep the history around.
     /// Everytime we :hammer-time: them, it will reset this countdown.
     /// The user must avoid an ipset ban for this long before their
-    /// previous ipset bans are forgotten.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, value_parser = parse_duration)]
-    pub ipset_ban_ttl: Duration,
+    /// previous bans are forgotten.
+    #[arg(long, alias = "ipset-ban-ttl", value_parser = parse_duration)]
+    pub ban_ttl: Duration,
 
     /// The time of the first ban. Each subsequent ban will be increased
-    /// linearly by this amount (resulting in --ipset-base-time * ban count).
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, value_parser = parse_duration)]
-    pub ipset_base_time: Duration,
+    /// linearly by this amount (resulting in `--ipset-base-time` * ban count).
+    #[arg(long, alias = "ipset-base-time", value_parser = parse_duration)]
+    pub ban_base_time: Duration,
 
-    /// The name of the ipset for IPv4.
-    #[arg(long)]
-    pub ipset_ipv4_name: String,
+    /// The name of the nftables table. Protocol family must be `inet`.
+    #[arg(long, default_value = "leroy")]
+    pub table: CString,
 
-    /// The name of the ipset for IPv6.
-    #[arg(long)]
-    pub ipset_ipv6_name: String,
+    /// The name of the ipset for IPv4 (must be in `--table` with type
+    /// `ipv4_addr` and flags exactly `timeout`).
+    #[arg(long, alias = "ipset-ipv4-name", default_value = "leroy4")]
+    pub ipv4_set: CString,
 
-    /// The number of seconds to accumulate ban counts before reporting and
-    /// resetting.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, default_value = "10s", value_parser = parse_duration)]
-    pub reporting_ban_time_period: Duration,
+    /// The name of the ipset for IPv6 (must be in `--table` with type
+    /// `ipv6_addr` and flags exactly `timeout`).
+    #[arg(long, alias = "ipset-ipv6-name", default_value = "leroy6")]
+    pub ipv6_set: CString,
+
+    #[arg(long, alias = "reporting-ban-time-period", default_value = "10s", value_parser = parse_duration, hide = true)]
+    pub _reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     pub reporting_ip_time_period: Duration,
 
     /// Initial capacity of the rate limiter table and recidivism cache.
-    /// Choose a value large enough for a typical DDOS, to avoid gc and memory
+    /// Choose a value large enough for a typical DDoS, to avoid gc and memory
     /// allocation when under attack.
     #[arg(long, default_value = "100000")]
     pub cache_initial_capacity: usize,
@@ -96,31 +86,17 @@ pub struct Args {
     #[arg(long, default_value = "500000")]
     pub cache_max_size: u64,
 
-    /// Do not actually actually test or manage ipsets. Useful for test runs
-    /// without privileges.
+    /// Do not actually communicate with the kernel. Useful for testing without
+    /// privileges.
     #[arg(long)]
     pub dry_run: bool,
-
-    /// Maximum number of IPs to batch before flushing to nftables.
-    /// Higher values reduce syscalls but increase ban latency.
-    #[arg(long, default_value = "100")]
-    pub batch_size: usize,
-
-    /// Maximum time to wait before flushing batch to nftables.
-    /// Ensures IPs are banned even if batch_size not reached.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, default_value = "100ms", value_parser = parse_duration)]
-    pub batch_timeout: Duration,
 }
 
 impl Args {
-    fn seconds_to_ban(&self, ban_count: u32) -> u32 {
-        self.ipset_base_time
+    fn time_to_ban(&self, ban_count: u32) -> Duration {
+        self.ban_base_time
             .checked_mul(ban_count)
-            .and_then(|time| u32::try_from(time.as_secs()).ok())
-            .unwrap_or(u32::MAX)
+            .unwrap_or(Duration::MAX)
     }
 }
 
@@ -129,10 +105,12 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 pub struct Leroy {
-    sessions: ByIpFamily<NftSession>,
+    socket: Option<mnl::Socket>,
+    nlmsg_batch: NlmsgBatch,
+    nlmsg_recv_buffer: Vec<u8>,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
-    ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
+    ban_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
     recidivism_counts: Cache<IpAddr, u32, BuildHasherDefault<FxHasher>>,
 
     line_count: u64,
@@ -143,59 +121,44 @@ pub struct Leroy {
 
 impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
-        Ok(Leroy {
-            sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
-                let (name, localhost, nf_family) = match family {
-                    IpFamily::V4 => (
-                        &args.ipset_ipv4_name,
-                        IpAddr::V4(Ipv4Addr::LOCALHOST),
-                        NfFamily::INet,
-                    ),
-                    IpFamily::V6 => (
-                        &args.ipset_ipv6_name,
-                        IpAddr::V6(Ipv6Addr::LOCALHOST),
-                        NfFamily::INet,
-                    ),
-                };
-                let mut session = NftSession::new(
-                    "leroy".to_string(),
-                    name.clone(),
-                    nf_family,
-                    args.batch_size,
-                    args.batch_timeout,
-                );
-                session.set_dry_run(args.dry_run);
-                if !args.dry_run {
-                    session.test(localhost).map_err(|err| {
-                        format!("Failed to test set {name:?} in table 'leroy': {err}. Please create the table and set before running.")
-                    })?;
-                }
-                Ok(session)
-            })?,
+        let mut leroy = Leroy {
+            socket: (!args.dry_run)
+                .then(|| mnl::Socket::new(mnl::Bus::Netfilter))
+                .transpose()?,
+            nlmsg_batch: NlmsgBatch::new(Seq(0)),
+            nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
-                        .ok_or_else(|| format!("--bl-period must be non-zero"))?
+                        .ok_or_else(|| "--bl-period must be non-zero".to_owned())?
                         .allow_burst(bl_threshold),
                     args.cache_initial_capacity,
                     BuildHasherDefault::default(),
                 )),
                 None => None, // ban on sight
             },
-            ipset_cache: Cache::builder()
+            ban_cache: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.ipset_base_time.saturating_sub(Duration::from_secs(1)))
+                .time_to_live(args.ban_base_time.saturating_sub(Duration::from_secs(1)))
                 .build_with_hasher(Default::default()),
             recidivism_counts: Cache::builder()
                 .initial_capacity(args.cache_initial_capacity)
                 .max_capacity(args.cache_max_size)
-                .time_to_live(args.ipset_ban_ttl)
+                .time_to_live(args.ban_ttl)
                 .build_with_hasher(Default::default()),
             line_count: 0,
             line_count_start: Instant::now(),
             args,
-        })
+        };
+
+        // Ban some reserved IPs to test configuration and kernel communication.
+        info!("Testing bans ...");
+        leroy.ban(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))?;
+        leroy.ban(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)))?;
+
+        info!("Ready");
+        Ok(leroy)
     }
 
     pub fn handle_line(&mut self, line: &Vec<u8>) {
@@ -204,10 +167,10 @@ impl Leroy {
         if self
             .ip_rate_limiters
             .as_mut()
-            .map_or(true, |l| l.check_key(line).is_err())
+            .is_none_or(|l| l.check_key(line).is_err())
         {
             match IpAddr::parse_ascii(line) {
-                Ok(ip) => self.ban(ip),
+                Ok(ip) => self.ban(ip).expect("ban"), // Error likely unrecoverable
                 Err(err) => error!(
                     "Error parsing IP from {:?}: {}",
                     String::from_utf8_lossy(line),
@@ -216,7 +179,7 @@ impl Leroy {
             }
         }
 
-        if self.line_count % 10 == 0
+        if self.line_count.is_multiple_of(10)
             && self.line_count_start.elapsed() > self.args.reporting_ip_time_period
         {
             info!(
@@ -229,35 +192,69 @@ impl Leroy {
         }
     }
 
-    fn ban(&mut self, ip: IpAddr) {
-        if self.ipset_cache.contains_key(&ip) {
+    fn ban(&mut self, ip: IpAddr) -> io::Result<()> {
+        if self.ban_cache.contains_key(&ip) {
             debug!("{ip} already banned");
-            return;
+            return Ok(());
         }
 
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
-        let timeout = self.args.seconds_to_ban(recidivism);
+        let timeout = self.args.time_to_ban(recidivism);
 
-        let ban_result = self
-            .sessions
-            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-            .add(ip, timeout);
+        let mut set = NftnlSet::new();
+        set.set_table(&self.args.table);
+        set.set_name(match ip {
+            IpAddr::V4(_) => &self.args.ipv4_set,
+            IpAddr::V6(_) => &self.args.ipv6_set,
+        });
 
-        match ban_result {
-            Ok(false) => debug!("{ip} already banned, but was no longer cached"),
-            Ok(true) => {
-                self.ipset_cache.insert(ip, ());
-                self.recidivism_counts.insert(ip, recidivism);
+        let mut elem = NftnlSetElem::new();
+        elem.set_key(ip);
+        elem.set_timeout(timeout);
+        set.add(elem);
+
+        self.nlmsg_batch.reset();
+        self.nlmsg_batch.begin();
+        // Ensure following delete succeeds unconditionally.
+        self.nlmsg_batch.set_elems(
+            NFT_MSG_NEWSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST) as u16,
+            &set,
+        );
+        // Delete to reset timeout if element already exists.
+        self.nlmsg_batch.set_elems(
+            NFT_MSG_DELSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST) as u16,
+            &set,
+        );
+        // Add element with new timeout.
+        self.nlmsg_batch.set_elems(
+            NFT_MSG_NEWSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST | NLM_F_ACK) as u16,
+            &set,
+        );
+        let seq = self.nlmsg_batch.seq();
+        self.nlmsg_batch.end();
+
+        if let Some(socket) = &mut self.socket {
+            let bytes = self.nlmsg_batch.as_bytes();
+            let tx = socket.send(bytes)?;
+            if tx != bytes.len() {
+                return Err(io::Error::other("did not send entire batch"));
             }
-            Err(err) => error!("Unable to add {ip} to set: {err}"),
-        }
-    }
-}
 
-impl Drop for Leroy {
-    fn drop(&mut self) {
-        // Flush any pending IPs before shutdown
-        let _ = self.sessions.ipv4.flush_on_shutdown();
-        let _ = self.sessions.ipv6.flush_on_shutdown();
+            for response in socket.recv(&mut self.nlmsg_recv_buffer[..])? {
+                let response = response?;
+                mnl::cb_run(response, seq.0, socket.portid())?;
+            }
+        }
+
+        self.ban_cache.insert(ip, ());
+        self.recidivism_counts.insert(ip, recidivism);
+
+        Ok(())
     }
 }

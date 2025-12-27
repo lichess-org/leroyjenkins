@@ -27,16 +27,14 @@ table inet leroy {
         type ipv4_addr;
         timeout 60s;
         size 65536;
-        flags interval;
-        auto-merge;
+        flags timeout;
     }
 
     set leroy6 {
         type ipv6_addr;
         timeout 60s;
         size 65536;
-        flags interval;
-        auto-merge;
+        flags timeout;
     }
 
     chain input {
@@ -68,14 +66,15 @@ table inet leroy {
 *leroyjenkins* reads data from stdin, and assumes each line is an IP address. Use in combination with standard unix tools like `tail -F`. When an IP address shows up too often before its cache times out, it will be added to the nftables set with the specified timeout.
 
 ```sh
-tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ipset-base-time=100s --ipset-ban-ttl=1d --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4
+tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ban-base-time=100s --ban-ttl=1d --table=leroy --ipv6-set=leroy6 --ipv4-set=leroy4
 ```
 
 > [!WARNING]
-> *leroyjenkins* itself does nothing to your firewall rules. Use the nftables rules above.
+> *leroyjenkins* itself does nothing to your firewall rules. Use nftables rules similar to the ones above.
 
 > [!NOTE]
-> Must be run with enough privileges to actually modify nftables sets.
+> Must be run with enough privileges to actually modify nftables sets. Otherwise fails with a generic:
+> `Error: Os { code: 71, kind: Uncategorized, message: "Protocol error" }`
 
 ## Examples
 
@@ -92,5 +91,5 @@ tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --outpu
 Because it's Unix, use `bash` and `shuf` to ban a random IP every second for an hour with:
 
 ```sh
-while sleep 1; do echo `shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`; done | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ipset-base-time=100s --ipset-ban-ttl=1h --ipset-ipv6-name=leroy6 --ipset-ipv4-name=leroy4
+while sleep 1; do echo `shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`; done | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv6-set=leroy6 --ipv4-set=leroy4
 ```

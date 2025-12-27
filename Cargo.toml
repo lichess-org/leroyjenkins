@@ -2,7 +2,7 @@
 name = "leroyjenkins"
 version = "0.2.0"
 publish = false
-description = "Follow ban logs to manage ipsets"
+description = "Follow ban logs to manage nftable sets"
 repository = "https://github.com/lichess-org/leroyjenkins"
 readme = "README.md"
 license = "GPL-3.0+"
@@ -21,18 +21,17 @@ mini-moka = "0.10.2"
 log = "0.4"
 pretty_env_logger = "0.5"
 clap = { version = "4.4.2", features = ["derive"] }
-nftables = "0.6"
 governor = "0.6.0"
 humantime = "2.1.0"
 rustc-hash = "1.1.0"
 mimalloc = "0.1.39"
+nftnl-sys = "0.6.4"
+mnl-sys = "0.2.2"
+libc = "0.2.178"
+mnl = "0.3.0"
 
 [dev-dependencies]
 criterion = "0.5.1"
-
-[[bin]]
-name = "leroyjenkins"
-bench = false # Use criterion harness
 
 [[bench]]
 name = "benches"
