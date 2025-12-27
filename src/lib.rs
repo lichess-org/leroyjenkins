@@ -132,7 +132,7 @@ impl Leroy {
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
-                        .ok_or_else(|| format!("--bl-period must be non-zero"))?
+                        .ok_or_else(|| "--bl-period must be non-zero".to_owned())?
                         .allow_burst(bl_threshold),
                     args.cache_initial_capacity,
                     BuildHasherDefault::default(),
@@ -167,7 +167,7 @@ impl Leroy {
         if self
             .ip_rate_limiters
             .as_mut()
-            .map_or(true, |l| l.check_key(line).is_err())
+            .is_none_or(|l| l.check_key(line).is_err())
         {
             match IpAddr::parse_ascii(line) {
                 Ok(ip) => self.ban(ip).expect("ban"), // Error likely unrecoverable
@@ -179,7 +179,7 @@ impl Leroy {
             }
         }
 
-        if self.line_count % 10 == 0
+        if self.line_count.is_multiple_of(10)
             && self.line_count_start.elapsed() > self.args.reporting_ip_time_period
         {
             info!(
@@ -243,10 +243,7 @@ impl Leroy {
             let bytes = self.nlmsg_batch.as_bytes();
             let tx = socket.send(bytes)?;
             if tx != bytes.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "did not send entire batch",
-                ));
+                return Err(io::Error::other("did not send entire batch"));
             }
 
             for response in socket.recv(&mut self.nlmsg_recv_buffer[..])? {
