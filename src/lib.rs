@@ -68,7 +68,7 @@ pub struct Args {
     #[arg(long, alias = "ipset-ipv6-name", default_value = "leroy6")]
     pub ipv6_set: CString,
 
-    #[arg(long, alias = "reporting-ban-time-period", default_value = "10s", value_parser = parse_duration)]
+    #[arg(long, alias = "reporting-ban-time-period", default_value = "10s", value_parser = parse_duration, hide = true)]
     pub _reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
