@@ -17,6 +17,11 @@ leroyjenkins is a lightweight IP banning tool that reads IP addresses from stdin
 cargo +nightly build --release
 ```
 
+**Format code:**
+```sh
+cargo +nightly fmt
+```
+
 **Run tests:**
 ```sh
 cargo +nightly test

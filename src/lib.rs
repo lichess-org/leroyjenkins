@@ -131,11 +131,7 @@ impl Leroy {
                     IpFamily::V4 => &args.ipset_ipv4_name,
                     IpFamily::V6 => &args.ipset_ipv6_name,
                 };
-                NftSession::new(
-                    "leroy".to_string(),
-                    name.clone(),
-                    ProtoFamily::Inet,
-                )
+                NftSession::new("leroy".to_string(), name.clone(), ProtoFamily::Inet)
             })?,
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
@@ -218,4 +214,3 @@ impl Leroy {
         }
     }
 }
-

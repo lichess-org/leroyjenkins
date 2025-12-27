@@ -30,10 +30,10 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 const TEST_IPS: &[&[u8]] = &[
-    b"192.0.2.1",       // TEST-NET-1 (RFC 5737)
-    b"198.51.100.2",    // TEST-NET-2 (RFC 5737)
-    b"2001:db8::1",     // IPv6 documentation prefix (RFC 3849)
-    b"2001:db8::2",     // IPv6 documentation prefix (RFC 3849)
+    b"192.0.2.1",    // TEST-NET-1 (RFC 5737)
+    b"198.51.100.2", // TEST-NET-2 (RFC 5737)
+    b"2001:db8::1",  // IPv6 documentation prefix (RFC 3849)
+    b"2001:db8::2",  // IPv6 documentation prefix (RFC 3849)
 ];
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -41,12 +41,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let args = Args::parse();
     info!("Debug NFT Test Wrapper");
-    info!("Config: base_time={}s, ban_ttl={}s",
-          args.ipset_base_time.as_secs(),
-          args.ipset_ban_ttl.as_secs());
-    info!("IPv4 set: {}, IPv6 set: {}",
-          args.ipset_ipv4_name,
-          args.ipset_ipv6_name);
+    info!(
+        "Config: base_time={}s, ban_ttl={}s",
+        args.ipset_base_time.as_secs(),
+        args.ipset_ban_ttl.as_secs()
+    );
+    info!(
+        "IPv4 set: {}, IPv6 set: {}",
+        args.ipset_ipv4_name, args.ipset_ipv6_name
+    );
 
     let leroy_args = LeroyArgs {
         bl_threshold: 0, // ban-on-sight
@@ -90,11 +93,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("Phase 3 complete.");
 
     info!("========== Test Complete ==========");
-    info!("Total operations: {} (4 IPs × 3 phases)", TEST_IPS.len() * 3);
-    info!("Expected ban durations: {}s, {}s, {}s",
-          args.ipset_base_time.as_secs(),
-          args.ipset_base_time.as_secs() * 2,
-          args.ipset_base_time.as_secs() * 3);
+    info!(
+        "Total operations: {} (4 IPs × 3 phases)",
+        TEST_IPS.len() * 3
+    );
+    info!(
+        "Expected ban durations: {}s, {}s, {}s",
+        args.ipset_base_time.as_secs(),
+        args.ipset_base_time.as_secs() * 2,
+        args.ipset_base_time.as_secs() * 3
+    );
 
     Ok(())
 }

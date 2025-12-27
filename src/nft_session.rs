@@ -5,7 +5,7 @@ use std::{
 };
 
 use log::info;
-use nftnl::{Batch, MsgType, ProtoFamily, Table, set::Set};
+use nftnl::{set::Set, Batch, MsgType, ProtoFamily, Table};
 
 /// Wrapper around nftables for managing IP ban sets with timeouts.
 /// Uses safe nftnl API with netlink batching.
@@ -66,7 +66,7 @@ impl NftSession {
                 let mut set = Set::<Ipv4Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    self.family,  // Use table's family (Inet)
+                    self.family, // Use table's family (Inet)
                 );
                 set.add_with_timeout(&ipv4, Some(timeout_ms));
 
@@ -79,7 +79,7 @@ impl NftSession {
                 let mut set = Set::<Ipv6Addr>::new_existing(
                     &self.set_name,
                     &table,
-                    self.family,  // Use table's family (Inet)
+                    self.family, // Use table's family (Inet)
                 );
                 set.add_with_timeout(&ipv6, Some(timeout_ms));
 
