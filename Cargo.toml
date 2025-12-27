@@ -6,7 +6,7 @@ description = "Follow ban logs to manage nftable sets"
 repository = "https://github.com/lichess-org/leroyjenkins"
 readme = "README.md"
 license = "GPL-3.0+"
-edition = "2021"
+edition = "2024"
 
 [lib]
 bench = false # Use criterion harness
