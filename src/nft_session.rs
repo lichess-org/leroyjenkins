@@ -23,10 +23,10 @@ impl NftSession {
     /// * `table` - The nftables table name (e.g., "leroy")
     /// * `set` - The set name within the table (e.g., "leroy4" or "leroy6")
     /// * `family` - The IP family (ProtoFamily::Ipv4 or ProtoFamily::Ipv6)
-    pub fn new(table: String, set: String, family: ProtoFamily) -> Result<Self, Box<dyn Error>> {
+    pub fn new(table: CString, set: String, family: ProtoFamily) -> Result<Self, Box<dyn Error>> {
         let socket = mnl::Socket::new(mnl::Bus::Netfilter)?;
         Ok(NftSession {
-            table_name: CString::new(table)?,
+            table_name: table,
             set_name: CString::new(set)?,
             family,
             socket,

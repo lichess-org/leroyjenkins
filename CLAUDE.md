@@ -90,10 +90,9 @@ The nftables table `leroyjenkins` and sets must be created before running (unles
 Example nftables setup:
 
 ```sh
-nft add table ip leroyjenkins
-nft add table ip6 leroyjenkins
-nft add set ip leroyjenkins leroy4 '{ type ipv4_addr; flags timeout; }'
-nft add set ip6 leroyjenkins leroy6 '{ type ipv6_addr; flags timeout; }'
+nft add table inet leroy
+nft add set inet leroy leroy4 '{ type ipv4_addr; flags timeout; }'
+nft add set inet leroy leroy6 '{ type ipv6_addr; flags timeout; }'
 ```
 
 ## Important dependencies

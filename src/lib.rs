@@ -6,6 +6,7 @@ mod nft_session;
 
 use std::{
     error::Error,
+    ffi::CString,
     hash::BuildHasherDefault,
     net::IpAddr,
     num::NonZeroU32,
@@ -28,18 +29,12 @@ use crate::{
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// The number of events that has to be exceeded before a ban decision.
-    /// Combines with `bl_period` to determine the exact rate limit.
-    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
+    /// The budget of events that has to be exceeded before a ban decision.
+    /// Replenished over `--bl-period`.
     #[arg(long)]
     pub bl_threshold: u32,
 
     /// The amount of time before the rate limiter is fully replenished.
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    ///
-    /// Combines with `bl_threshold` to determine the exact rate limit
-    /// see: https://github.com/antifuchs/governor/blob/master/governor/src/quota.rs#L9
     #[arg(long, default_value = "0s", value_parser = parse_duration)]
     pub bl_period: Duration,
 
@@ -47,47 +42,41 @@ pub struct Args {
     /// This reperesents the amount of time we'll keep the history around.
     /// Everytime we :hammer-time: them, it will reset this countdown.
     /// The user must avoid an ipset ban for this long before their
-    /// previous ipset bans are forgotten.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, value_parser = parse_duration)]
+    /// previous bans are forgotten.
+    #[arg(long, alias = "ban-ttl", value_parser = parse_duration)]
     pub ipset_ban_ttl: Duration,
 
     /// The time of the first ban. Each subsequent ban will be increased
-    /// linearly by this amount (resulting in --ipset-base-time * ban count).
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
-    #[arg(long, value_parser = parse_duration)]
+    /// linearly by this amount (resulting in `--ipset-base-time` * ban count).
+    #[arg(long, alias = "base-time", value_parser = parse_duration)]
     pub ipset_base_time: Duration,
 
-    /// The name of the ipset for IPv4 (in inet table).
-    #[arg(long)]
+    /// The name of the nftables table. Protocol family must be `inet`.
+    #[arg(long, default_value = "leroy")]
+    pub table: CString,
+
+    /// The name of the ipset for IPv4 (must be in `--table` with type
+    /// `ipv4_addr` and flags exactly `timeout`).
+    #[arg(long, alias = "ipv4-set")]
     pub ipset_ipv4_name: String,
 
-    /// The name of the ipset for IPv6 (in inet table).
-    #[arg(long)]
+    /// The name of the ipset for IPv6 (must be in `--table` with type
+    /// `ipv6_addr` and flags exactly `timeout`).
+    #[arg(long, alias = "ipv6-set")]
     pub ipset_ipv6_name: String,
 
     /// The number of seconds to accumulate ban counts before reporting and
     /// resetting.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     pub reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
-    ///
-    /// Uses humantime to parse the duration.
-    /// See: https://docs.rs/humantime/latest/humantime/ for details
     #[arg(long, default_value = "10s", value_parser = parse_duration)]
     pub reporting_ip_time_period: Duration,
 
     /// Initial capacity of the rate limiter table and recidivism cache.
-    /// Choose a value large enough for a typical DDOS, to avoid gc and memory
+    /// Choose a value large enough for a typical DDoS, to avoid gc and memory
     /// allocation when under attack.
     #[arg(long, default_value = "100000")]
     pub cache_initial_capacity: usize,
@@ -131,7 +120,7 @@ impl Leroy {
                     IpFamily::V4 => &args.ipset_ipv4_name,
                     IpFamily::V6 => &args.ipset_ipv6_name,
                 };
-                NftSession::new("leroy".to_string(), name.clone(), ProtoFamily::Inet)
+                NftSession::new(args.table.clone(), name.clone(), ProtoFamily::Inet)
             })?,
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
