@@ -27,16 +27,14 @@ table inet leroy {
         type ipv4_addr;
         timeout 60s;
         size 65536;
-        flags interval;
-        auto-merge;
+        flags timeout;
     }
 
     set leroy6 {
         type ipv6_addr;
         timeout 60s;
         size 65536;
-        flags interval;
-        auto-merge;
+        flags timeout;
     }
 
     chain input {

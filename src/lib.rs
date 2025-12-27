@@ -57,12 +57,12 @@ pub struct Args {
 
     /// The name of the ipset for IPv4 (must be in `--table` with type
     /// `ipv4_addr` and flags exactly `timeout`).
-    #[arg(long, alias = "ipv4-set")]
+    #[arg(long, alias = "ipv4-set", default_value = "leroy4")]
     pub ipset_ipv4_name: String,
 
     /// The name of the ipset for IPv6 (must be in `--table` with type
     /// `ipv6_addr` and flags exactly `timeout`).
-    #[arg(long, alias = "ipv6-set")]
+    #[arg(long, alias = "ipv6-set", default_value = "leroy6")]
     pub ipset_ipv6_name: String,
 
     /// The number of seconds to accumulate ban counts before reporting and
