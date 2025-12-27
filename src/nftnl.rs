@@ -107,7 +107,7 @@ impl NftnlSetElem {
             nftnl_set_elem_set_u64(
                 self.inner.as_ptr(),
                 nftnl_sys::NFTNL_SET_ELEM_TIMEOUT as u16,
-                duration.as_millis() as u64,
+                duration.as_millis().try_into().unwrap_or(u64::MAX),
             )
         }
     }
@@ -125,14 +125,24 @@ impl Drop for NftnlSetElem {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct Seq(pub u32);
+
+impl Seq {
+    #[must_use]
+    pub fn inc(self) -> Self {
+        Seq(self.0.wrapping_add(1))
+    }
+}
+
 pub struct NlmsgBatch<'a> {
     batch: NonNull<mnl_nlmsg_batch>,
-    seq: u32,
+    seq: Seq,
     _marker: PhantomData<&'a [u8]>,
 }
 
 impl<'a> NlmsgBatch<'a> {
-    pub fn new(buffer: &mut [u8], seq: u32) -> NlmsgBatch<'_> {
+    pub fn new(buffer: &mut [u8], seq: Seq) -> NlmsgBatch<'_> {
         NlmsgBatch {
             batch: unsafe {
                 NonNull::new(mnl_nlmsg_batch_start(
@@ -147,11 +157,11 @@ impl<'a> NlmsgBatch<'a> {
     }
 
     pub fn begin(&mut self) {
-        self.seq = self.seq.wrapping_add(1);
+        self.seq = self.seq.inc();
         unsafe {
             nftnl_batch_begin(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
-                self.seq,
+                self.seq.0,
             );
             assert!(
                 mnl_nlmsg_batch_next(self.batch.as_ptr()),
@@ -161,14 +171,14 @@ impl<'a> NlmsgBatch<'a> {
     }
 
     pub fn set_elems(&mut self, msg_type: u16, family: u16, flags: u16, set: &NftnlSet) {
-        self.seq = self.seq.wrapping_add(1);
+        self.seq = self.seq.inc();
         let header = unsafe {
             nftnl_nlmsg_build_hdr(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
                 msg_type,
                 family,
                 flags,
-                self.seq,
+                self.seq.0,
             )
         };
 
@@ -182,22 +192,16 @@ impl<'a> NlmsgBatch<'a> {
     }
 
     pub fn end(&mut self) {
-        self.seq = self.seq.wrapping_add(1);
+        self.seq = self.seq.inc();
         unsafe {
             nftnl_batch_end(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
-                self.seq,
+                self.seq.0,
             );
             assert!(
                 mnl_nlmsg_batch_next(self.batch.as_ptr()),
                 "mnl_nlmsg_batch_next after end"
             );
-        }
-    }
-
-    pub fn reset(&mut self) {
-        unsafe {
-            mnl_nlmsg_batch_reset(self.batch.as_ptr());
         }
     }
 
@@ -210,7 +214,7 @@ impl<'a> NlmsgBatch<'a> {
         }
     }
 
-    pub fn seq(&self) -> u32 {
+    pub fn seq(&self) -> Seq {
         self.seq
     }
 }

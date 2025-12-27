@@ -1,8 +1,8 @@
 #![feature(addr_parse_ascii)]
+#![feature(ip_as_octets)]
 
-mod ip_family;
 mod keyed_limiter;
-mod nft_session;
+mod nftnl;
 
 use std::{
     error::Error,
@@ -15,15 +15,17 @@ use std::{
 
 use clap::Parser;
 use governor::Quota;
+use libc::{
+    NFPROTO_INET, NFT_MSG_DELSETELEM, NFT_MSG_NEWSETELEM, NLM_F_ACK, NLM_F_CREATE, NLM_F_REQUEST,
+};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
-use nftnl::ProtoFamily;
+use mnl_sys::MNL_SOCKET_BUFFER_SIZE;
 use rustc_hash::FxHasher;
 
 use crate::{
-    ip_family::{ByIpFamily, IpFamily},
     keyed_limiter::KeyedLimiter,
-    nft_session::NftSession,
+    nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch, Seq},
 };
 
 #[derive(Parser, Debug)]
@@ -58,12 +60,12 @@ pub struct Args {
     /// The name of the ipset for IPv4 (must be in `--table` with type
     /// `ipv4_addr` and flags exactly `timeout`).
     #[arg(long, alias = "ipv4-set", default_value = "leroy4")]
-    pub ipset_ipv4_name: String,
+    pub ipset_ipv4_name: CString,
 
     /// The name of the ipset for IPv6 (must be in `--table` with type
     /// `ipv6_addr` and flags exactly `timeout`).
     #[arg(long, alias = "ipv6-set", default_value = "leroy6")]
-    pub ipset_ipv6_name: String,
+    pub ipset_ipv6_name: CString,
 
     /// The number of seconds to accumulate ban counts before reporting and
     /// resetting.
@@ -84,14 +86,18 @@ pub struct Args {
     /// The maximum number of entries to keep in the recidivism cache.
     #[arg(long, default_value = "500000")]
     pub cache_max_size: u64,
+
+    /// Do not actually communicate with the kernel. Useful for testing without
+    /// privileges.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 impl Args {
-    fn seconds_to_ban(&self, ban_count: u32) -> u32 {
+    fn time_to_ban(&self, ban_count: u32) -> Duration {
         self.ipset_base_time
             .checked_mul(ban_count)
-            .and_then(|time| u32::try_from(time.as_secs()).ok())
-            .unwrap_or(u32::MAX)
+            .unwrap_or(Duration::MAX)
     }
 }
 
@@ -100,7 +106,10 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 pub struct Leroy {
-    sessions: ByIpFamily<NftSession>,
+    socket: Option<mnl::Socket>,
+    nlmsg_send_buffer: Vec<u8>,
+    nlmsg_recv_buffer: Vec<u8>,
+    seq: Seq,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
     ipset_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
@@ -115,13 +124,12 @@ pub struct Leroy {
 impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         Ok(Leroy {
-            sessions: ByIpFamily::try_new_with::<_, Box<dyn Error>>(|family| {
-                let name = match family {
-                    IpFamily::V4 => &args.ipset_ipv4_name,
-                    IpFamily::V6 => &args.ipset_ipv6_name,
-                };
-                NftSession::new(args.table.clone(), name.clone(), ProtoFamily::Inet)
-            })?,
+            socket: (!args.dry_run)
+                .then(|| mnl::Socket::new(mnl::Bus::Netfilter))
+                .transpose()?,
+            nlmsg_send_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
+            nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
+            seq: Seq(0),
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
@@ -186,20 +194,58 @@ impl Leroy {
         }
 
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
-        let timeout = self.args.seconds_to_ban(recidivism);
+        let timeout = self.args.time_to_ban(recidivism);
 
-        let ban_result = self
-            .sessions
-            .by_family_mut(IpFamily::from_ipv4(ip.is_ipv4()))
-            .add(ip, timeout);
+        let mut set = NftnlSet::new();
+        set.set_table(&self.args.table);
+        set.set_name(match ip {
+            IpAddr::V4(_) => &self.args.ipset_ipv4_name,
+            IpAddr::V6(_) => &self.args.ipset_ipv6_name,
+        });
 
-        match ban_result {
-            Ok(false) => debug!("{ip} already banned, but was no longer cached"),
-            Ok(true) => {
-                self.ipset_cache.insert(ip, ());
-                self.recidivism_counts.insert(ip, recidivism);
+        let mut elem = NftnlSetElem::new();
+        elem.set_key(ip);
+        elem.set_timeout(timeout);
+        set.add(elem);
+
+        let mut batch = NlmsgBatch::new(&mut self.nlmsg_send_buffer, self.seq);
+        batch.begin();
+        // Ensure following delete succeeds unconditionally.
+        batch.set_elems(
+            NFT_MSG_NEWSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST) as u16,
+            &set,
+        );
+        // Delete to reset timeout if element already exists.
+        batch.set_elems(
+            NFT_MSG_DELSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST) as u16,
+            &set,
+        );
+        // Add element with new timeout.
+        batch.set_elems(
+            NFT_MSG_NEWSETELEM as u16,
+            NFPROTO_INET as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST | NLM_F_ACK) as u16,
+            &set,
+        );
+        self.seq = batch.seq();
+        batch.end();
+
+        if let Some(socket) = &mut self.socket {
+            let bytes = batch.as_bytes();
+            let tx = socket.send(bytes).expect("send");
+            assert_eq!(tx, bytes.len());
+
+            for response in socket.recv(&mut self.nlmsg_recv_buffer[..]).expect("recv") {
+                let response = response.expect("decode response");
+                mnl::cb_run(response, self.seq.0, socket.portid()).expect("cb run");
             }
-            Err(err) => error!("Unable to add {ip} to set: {err}"),
         }
+
+        self.ipset_cache.insert(ip, ());
+        self.recidivism_counts.insert(ip, recidivism);
     }
 }

@@ -585,11 +585,13 @@ dependencies = [
  "criterion",
  "governor",
  "humantime",
+ "libc",
  "log",
  "mimalloc",
  "mini-moka",
  "mnl",
- "nftnl",
+ "mnl-sys",
+ "nftnl-sys",
  "pretty_env_logger",
  "rustc-hash",
 ]
@@ -683,19 +685,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "nftnl"
-version = "0.9.0"
-source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#f770a7cc28beefab58bfbf735dc9fbb9b8cb5582"
-dependencies = [
- "bitflags",
- "log",
- "nftnl-sys",
-]
-
-[[package]]
 name = "nftnl-sys"
 version = "0.6.4"
-source = "git+https://github.com/lichess-org/nftnl-rs?branch=add-set-elem-timeout#f770a7cc28beefab58bfbf735dc9fbb9b8cb5582"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffa28b4c81eea6a8a4fd454634d425e1a559250a50a926de4517dd9607fe9a4"
 dependencies = [
  "cfg-if",
  "libc",
