@@ -205,6 +205,12 @@ impl<'a> NlmsgBatch<'a> {
         }
     }
 
+    pub fn reset(&mut self) {
+        unsafe {
+            mnl_nlmsg_batch_reset(self.batch.as_ptr());
+        }
+    }
+
     pub fn as_bytes(&self) -> &'a [u8] {
         unsafe {
             slice::from_raw_parts(

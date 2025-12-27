@@ -8,7 +8,8 @@ use std::{
     error::Error,
     ffi::CString,
     hash::BuildHasherDefault,
-    net::IpAddr,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
     time::{Duration, Instant},
 };
@@ -123,7 +124,7 @@ pub struct Leroy {
 
 impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
-        Ok(Leroy {
+        let mut leroy = Leroy {
             socket: (!args.dry_run)
                 .then(|| mnl::Socket::new(mnl::Bus::Netfilter))
                 .transpose()?,
@@ -153,7 +154,12 @@ impl Leroy {
             line_count: 0,
             line_count_start: Instant::now(),
             args,
-        })
+        };
+
+        leroy.ban(IpAddr::V4(Ipv4Addr::LOCALHOST))?;
+        leroy.ban(IpAddr::V6(Ipv6Addr::LOCALHOST))?;
+
+        Ok(leroy)
     }
 
     pub fn handle_line(&mut self, line: &Vec<u8>) {
@@ -165,7 +171,7 @@ impl Leroy {
             .map_or(true, |l| l.check_key(line).is_err())
         {
             match IpAddr::parse_ascii(line) {
-                Ok(ip) => self.ban(ip),
+                Ok(ip) => self.ban(ip).expect("ban"), // Error likely unrecoverable
                 Err(err) => error!(
                     "Error parsing IP from {:?}: {}",
                     String::from_utf8_lossy(line),
@@ -187,10 +193,10 @@ impl Leroy {
         }
     }
 
-    fn ban(&mut self, ip: IpAddr) {
+    fn ban(&mut self, ip: IpAddr) -> io::Result<()> {
         if self.ipset_cache.contains_key(&ip) {
             debug!("{ip} already banned");
-            return;
+            return Ok(());
         }
 
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
@@ -209,6 +215,7 @@ impl Leroy {
         set.add(elem);
 
         let mut batch = NlmsgBatch::new(&mut self.nlmsg_send_buffer, self.seq);
+        batch.reset();
         batch.begin();
         // Ensure following delete succeeds unconditionally.
         batch.set_elems(
@@ -236,16 +243,23 @@ impl Leroy {
 
         if let Some(socket) = &mut self.socket {
             let bytes = batch.as_bytes();
-            let tx = socket.send(bytes).expect("send");
-            assert_eq!(tx, bytes.len());
+            let tx = socket.send(bytes)?;
+            if tx != bytes.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "did not send entire batch",
+                ));
+            }
 
-            for response in socket.recv(&mut self.nlmsg_recv_buffer[..]).expect("recv") {
-                let response = response.expect("decode response");
-                mnl::cb_run(response, self.seq.0, socket.portid()).expect("cb run");
+            for response in socket.recv(&mut self.nlmsg_recv_buffer[..])? {
+                let response = response?;
+                mnl::cb_run(response, self.seq.0, socket.portid())?;
             }
         }
 
         self.ipset_cache.insert(ip, ());
         self.recidivism_counts.insert(ip, recidivism);
+
+        Ok(())
     }
 }
