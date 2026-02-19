@@ -1,6 +1,6 @@
 use std::{hint::black_box, net::Ipv4Addr, time::Duration};
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use leroyjenkins::{Args, Leroy};
 use mimalloc::MiMalloc;
 
@@ -18,7 +18,7 @@ fn make_leroy() -> Leroy {
             ipv4_set: c"leroy4".to_owned(),
             ipv6_set: c"leroy6".to_owned(),
             reporting_ip_time_period: Duration::from_secs(1),
-            _reporting_ban_time_period: Duration::from_secs(1),
+            reporting_ban_time_period: Duration::from_secs(1),
             cache_initial_capacity: 100000,
             cache_max_size: 500000,
             dry_run: true,

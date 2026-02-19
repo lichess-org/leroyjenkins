@@ -7,10 +7,10 @@ use std::{
 };
 
 use governor::{
+    NotUntil, Quota, RateLimiter,
     clock::{DefaultClock, QuantaInstant},
     nanos::Nanos,
-    state::{keyed::ShrinkableKeyedStateStore, StateStore},
-    NotUntil, Quota, RateLimiter,
+    state::{StateStore, keyed::ShrinkableKeyedStateStore},
 };
 use log::debug;
 

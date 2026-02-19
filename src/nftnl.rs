@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_char, c_void, CStr},
+    ffi::{CStr, c_char, c_void},
     mem,
     net::IpAddr,
     ptr::NonNull,
@@ -8,9 +8,9 @@ use std::{
 };
 
 use mnl_sys::{
-    mnl_nlmsg_batch, mnl_nlmsg_batch_current, mnl_nlmsg_batch_head, mnl_nlmsg_batch_next,
-    mnl_nlmsg_batch_reset, mnl_nlmsg_batch_size, mnl_nlmsg_batch_start, mnl_nlmsg_batch_stop,
-    MNL_SOCKET_BUFFER_SIZE,
+    MNL_SOCKET_BUFFER_SIZE, mnl_nlmsg_batch, mnl_nlmsg_batch_current, mnl_nlmsg_batch_head,
+    mnl_nlmsg_batch_next, mnl_nlmsg_batch_reset, mnl_nlmsg_batch_size, mnl_nlmsg_batch_start,
+    mnl_nlmsg_batch_stop,
 };
 use nftnl_sys::{
     nftnl_batch_begin, nftnl_batch_end, nftnl_nlmsg_build_hdr, nftnl_set, nftnl_set_alloc,

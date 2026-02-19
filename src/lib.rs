@@ -68,8 +68,8 @@ pub struct Args {
     #[arg(long, alias = "ipset-ipv6-name", default_value = "leroy6")]
     pub ipv6_set: CString,
 
-    #[arg(long, alias = "reporting-ban-time-period", default_value = "10s", value_parser = parse_duration, hide = true)]
-    pub _reporting_ban_time_period: Duration,
+    #[arg(long, alias = "reporting-ban-time-period", default_value = "1m", value_parser = parse_duration)]
+    pub reporting_ban_time_period: Duration,
 
     /// The number of seconds to accumulate ip counts before reporting and
     /// resetting.
@@ -116,6 +116,9 @@ pub struct Leroy {
     line_count: u64,
     line_count_start: Instant,
 
+    ban_count: u64,
+    ban_count_start: Instant,
+
     args: Args,
 }
 
@@ -149,6 +152,8 @@ impl Leroy {
                 .build_with_hasher(Default::default()),
             line_count: 0,
             line_count_start: Instant::now(),
+            ban_count: 0,
+            ban_count_start: Instant::now(),
             args,
         };
 
@@ -252,8 +257,24 @@ impl Leroy {
             }
         }
 
+        info!(
+            "Banning {ip} for {}s (recidivism: {recidivism})",
+            timeout.as_secs()
+        );
+
         self.ban_cache.insert(ip, ());
         self.recidivism_counts.insert(ip, recidivism);
+
+        self.ban_count += 1;
+        if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
+            info!(
+                "Banned {} ips in the past {}s",
+                self.ban_count,
+                self.ban_count_start.elapsed().as_secs()
+            );
+            self.ban_count = 0;
+            self.ban_count_start = Instant::now();
+        }
 
         Ok(())
     }
