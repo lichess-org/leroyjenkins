@@ -26,7 +26,7 @@ humantime = "2.1.0"
 rustc-hash = "1.1.0"
 mimalloc = "0.1.39"
 nftnl-sys = "0.6.4"
-mnl-sys = "0.2.2"
+mnl-sys = { version = "0.2.2", features = ["mnl-1-0-4"] }
 libc = "0.2.178"
 
 [dev-dependencies]

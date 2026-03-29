@@ -6,7 +6,7 @@ use std::{
 
 use mnl_sys::{
     MNL_SOCKET_AUTOPID, mnl_cb_run, mnl_socket, mnl_socket_bind, mnl_socket_close,
-    mnl_socket_get_portid, mnl_socket_open, mnl_socket_recvfrom, mnl_socket_sendto,
+    mnl_socket_get_portid, mnl_socket_open2, mnl_socket_recvfrom, mnl_socket_sendto,
 };
 
 use crate::seq::Seq;
@@ -23,9 +23,14 @@ impl MnlSocket {
     }
 
     fn open_netfilter() -> io::Result<Self> {
+        // Note: Sending/receiving for netfilter sockets is synchronous
+        // even with SOCK_NONBLOCK. It merely makes mnl_socket_recvfrom() not
+        // block if no further response is available.
         Ok(MnlSocket {
-            inner: NonNull::new(unsafe { mnl_socket_open(libc::NETLINK_NETFILTER) })
-                .ok_or_else(io::Error::last_os_error)?,
+            inner: NonNull::new(unsafe {
+                mnl_socket_open2(libc::NETLINK_NETFILTER, libc::SOCK_NONBLOCK)
+            })
+            .ok_or_else(io::Error::last_os_error)?,
         })
     }
 

@@ -18,7 +18,9 @@ use std::{
 
 use clap::Parser;
 use governor::Quota;
-use libc::{NFPROTO_INET, NFT_MSG_DELSETELEM, NFT_MSG_NEWSETELEM, NLM_F_CREATE, NLM_F_REQUEST};
+use libc::{
+    NFPROTO_INET, NFT_MSG_DELSETELEM, NFT_MSG_NEWSETELEM, NLM_F_ACK, NLM_F_CREATE, NLM_F_REQUEST,
+};
 use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use mnl_sys::MNL_SOCKET_BUFFER_SIZE;
@@ -168,7 +170,7 @@ impl Leroy {
         Ok(leroy)
     }
 
-    pub fn handle_line(&mut self, line: &Vec<u8>) {
+    pub fn handle_line(&mut self, line: &Vec<u8>) -> io::Result<()> {
         self.line_count += 1;
 
         if self
@@ -177,7 +179,7 @@ impl Leroy {
             .is_none_or(|l| l.check_key(line).is_err())
         {
             match IpAddr::parse_ascii(line) {
-                Ok(ip) => self.ban(ip).expect("ban"), // Error likely unrecoverable
+                Ok(ip) => self.ban(ip)?,
                 Err(err) => error!(
                     "Error parsing IP from {:?}: {}",
                     String::from_utf8_lossy(line),
@@ -197,6 +199,8 @@ impl Leroy {
             self.line_count = 0;
             self.line_count_start = Instant::now();
         }
+
+        Ok(())
     }
 
     fn ban(&mut self, ip: IpAddr) -> io::Result<()> {
@@ -207,6 +211,10 @@ impl Leroy {
 
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         let timeout = self.args.time_to_ban(recidivism);
+        info!(
+            "Banning {ip} for {}s (recidivism: {recidivism})",
+            timeout.as_secs()
+        );
 
         let mut set = NftnlSet::new();
         set.set_table(&self.args.table);
@@ -243,53 +251,52 @@ impl Leroy {
         self.nlmsg_batch.set_elems(
             NFT_MSG_NEWSETELEM as u16,
             NFPROTO_INET as u16,
-            (NLM_F_CREATE | NLM_F_REQUEST) as u16,
+            (NLM_F_CREATE | NLM_F_REQUEST | NLM_F_ACK) as u16,
             &set,
             seq,
         );
         self.nlmsg_batch.end(seq);
 
-        let response = if let Some(socket) = &mut self.socket {
-            // Send.
+        if let Some(socket) = &mut self.socket {
             let bytes = self.nlmsg_batch.as_bytes();
             socket.send(bytes)?;
 
-            // Receive (NLM_F_ACK on batch end, exactly one response per batch).
+            let mut seen_error = false;
             let port_id = socket.port_id();
-            let res = socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], Some(seq), port_id);
-            if res.is_err() {
-                socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], Some(seq), port_id);
-            }
-            res
-        } else {
-            Ok(0)
-        };
-
-        match response {
-            Ok(_) => {
-                info!(
-                    "Banned {ip} for {}s (recidivism: {recidivism})",
-                    timeout.as_secs()
-                );
-
-                self.ban_cache.insert(ip, ());
-                self.recidivism_counts.insert(ip, recidivism);
-
-                self.ban_count += 1;
-                if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
-                    info!(
-                        "Banned {} ips in the past {}s",
-                        self.ban_count,
-                        self.ban_count_start.elapsed().as_secs()
-                    );
-                    self.ban_count = 0;
-                    self.ban_count_start = Instant::now();
+            while let Err(err) =
+                socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], Some(seq), port_id)
+            {
+                match err {
+                    err if seen_error && err.kind() == io::ErrorKind::WouldBlock => break,
+                    err if err.raw_os_error() == Some(libc::ENFILE) => {
+                        error!("Error ENFILE banning {ip}: Set full?");
+                        seen_error = true;
+                    }
+                    err if err.raw_os_error() == Some(libc::ENOENT) => {
+                        error!("Error ENOENT banning {ip}: Table or set not created yet?");
+                        seen_error = true;
+                    }
+                    err if err.raw_os_error() == Some(libc::EPERM) => {
+                        error!("Error EPERM banning {ip}: Permission denied");
+                        return Err(err); // Unrecoverable
+                    }
+                    err => return Err(err), // Unknown, likely unrecoverable
                 }
             }
-            Err(err) if err.raw_os_error() == Some(libc::ENFILE) => {
-                error!("Failed to ban {ip}: ENFILE (set full?)");
-            }
-            Err(err) => return Err(err),
+        }
+
+        self.ban_cache.insert(ip, ());
+        self.recidivism_counts.insert(ip, recidivism);
+
+        self.ban_count += 1;
+        if self.ban_count_start.elapsed() > self.args.reporting_ban_time_period {
+            info!(
+                "Banned {} ips in the past {}s",
+                self.ban_count,
+                self.ban_count_start.elapsed().as_secs()
+            );
+            self.ban_count = 0;
+            self.ban_count_start = Instant::now();
         }
 
         Ok(())
