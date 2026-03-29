@@ -4,6 +4,7 @@
 mod keyed_limiter;
 mod mnl;
 mod nftnl;
+mod seq;
 
 use std::{
     error::Error,
@@ -24,11 +25,12 @@ use log::{debug, error, info};
 use mini_moka::unsync::Cache;
 use mnl_sys::MNL_SOCKET_BUFFER_SIZE;
 use rustc_hash::FxHasher;
+use seq::SeqGenerator;
 
 use crate::{
     keyed_limiter::KeyedLimiter,
     mnl::MnlSocket,
-    nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch, Seq},
+    nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch},
 };
 
 #[derive(Parser, Debug)]
@@ -108,6 +110,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 
 pub struct Leroy {
     socket: Option<MnlSocket>,
+    seq_generator: SeqGenerator,
     nlmsg_batch: NlmsgBatch,
     nlmsg_recv_buffer: Vec<u8>,
 
@@ -128,8 +131,9 @@ impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         let mut leroy = Leroy {
             socket: (!args.dry_run).then(MnlSocket::new_netfilter).transpose()?,
-            nlmsg_batch: NlmsgBatch::new(Seq(0)),
-            nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
+            seq_generator: SeqGenerator::new(),
+            nlmsg_batch: NlmsgBatch::new(),
+            nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize * 2],
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
@@ -206,6 +210,11 @@ impl Leroy {
         let recidivism: u32 = *self.recidivism_counts.get(&ip).unwrap_or(&0) + 1;
         let timeout = self.args.time_to_ban(recidivism);
 
+        info!(
+            "Banning {ip} for {}s (recidivism: {recidivism})",
+            timeout.as_secs()
+        );
+
         let mut set = NftnlSet::new();
         set.set_table(&self.args.table);
         set.set_name(match ip {
@@ -218,14 +227,16 @@ impl Leroy {
         elem.set_timeout(timeout);
         set.add(elem);
 
+        let seq = self.seq_generator.inc();
         self.nlmsg_batch.reset();
-        self.nlmsg_batch.begin();
+        self.nlmsg_batch.begin(seq);
         // Ensure following delete succeeds unconditionally.
         self.nlmsg_batch.set_elems(
             NFT_MSG_NEWSETELEM as u16,
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST) as u16,
             &set,
+            seq,
         );
         // Delete to reset timeout if element already exists.
         self.nlmsg_batch.set_elems(
@@ -233,6 +244,7 @@ impl Leroy {
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST) as u16,
             &set,
+            seq,
         );
         // Add element with new timeout.
         self.nlmsg_batch.set_elems(
@@ -240,20 +252,27 @@ impl Leroy {
             NFPROTO_INET as u16,
             (NLM_F_CREATE | NLM_F_REQUEST | NLM_F_ACK) as u16,
             &set,
+            seq,
         );
-        let seq = self.nlmsg_batch.seq();
-        self.nlmsg_batch.end();
+        self.nlmsg_batch.end(seq);
 
         if let Some(socket) = &mut self.socket {
             let bytes = self.nlmsg_batch.as_bytes();
             socket.send(bytes)?;
-            socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], seq, socket.port_id())?;
+            loop {
+                match socket.recv_and_validate(
+                    &mut self.nlmsg_recv_buffer[..],
+                    None, // Some(seq),
+                    socket.port_id(),
+                ) {
+                    Ok(_) => break,
+                    Err(err) if err.raw_os_error() == Some(libc::ENFILE) => {
+                        error!("Failed to ban {ip}: ENFILE (set full?)");
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
         }
-
-        info!(
-            "Banning {ip} for {}s (recidivism: {recidivism})",
-            timeout.as_secs()
-        );
 
         self.ban_cache.insert(ip, ());
         self.recidivism_counts.insert(ip, recidivism);

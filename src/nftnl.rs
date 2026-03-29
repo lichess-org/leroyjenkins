@@ -19,6 +19,8 @@ use nftnl_sys::{
     nftnl_set_free, nftnl_set_set_str,
 };
 
+use crate::seq::Seq;
+
 pub struct NftnlSet {
     inner: NonNull<nftnl_set>,
 }
@@ -125,24 +127,13 @@ impl Drop for NftnlSetElem {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct Seq(pub u32);
-
-impl Seq {
-    #[must_use]
-    pub fn inc(self) -> Self {
-        Seq(self.0.wrapping_add(1))
-    }
-}
-
 pub struct NlmsgBatch {
     _buffer: Vec<u8>,
     batch: NonNull<mnl_nlmsg_batch>,
-    seq: Seq,
 }
 
 impl NlmsgBatch {
-    pub fn new(seq: Seq) -> NlmsgBatch {
+    pub fn new() -> NlmsgBatch {
         let mut buffer = vec![0; MNL_SOCKET_BUFFER_SIZE() as usize];
         let batch = NonNull::new(unsafe {
             mnl_nlmsg_batch_start(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
@@ -152,16 +143,14 @@ impl NlmsgBatch {
         NlmsgBatch {
             _buffer: buffer,
             batch,
-            seq,
         }
     }
 
-    pub fn begin(&mut self) {
-        self.seq = self.seq.inc();
+    pub fn begin(&mut self, seq: Seq) {
         unsafe {
             nftnl_batch_begin(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
-                self.seq.0,
+                u32::from(seq),
             );
             assert!(
                 mnl_nlmsg_batch_next(self.batch.as_ptr()),
@@ -170,15 +159,14 @@ impl NlmsgBatch {
         }
     }
 
-    pub fn set_elems(&mut self, msg_type: u16, family: u16, flags: u16, set: &NftnlSet) {
-        self.seq = self.seq.inc();
+    pub fn set_elems(&mut self, msg_type: u16, family: u16, flags: u16, set: &NftnlSet, seq: Seq) {
         let header = unsafe {
             nftnl_nlmsg_build_hdr(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
                 msg_type,
                 family,
                 flags,
-                self.seq.0,
+                u32::from(seq),
             )
         };
 
@@ -191,12 +179,11 @@ impl NlmsgBatch {
         }
     }
 
-    pub fn end(&mut self) {
-        self.seq = self.seq.inc();
+    pub fn end(&mut self, seq: Seq) {
         unsafe {
             nftnl_batch_end(
                 mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
-                self.seq.0,
+                u32::from(seq),
             );
             assert!(
                 mnl_nlmsg_batch_next(self.batch.as_ptr()),
@@ -218,10 +205,6 @@ impl NlmsgBatch {
                 mnl_nlmsg_batch_size(self.batch.as_ptr()),
             )
         }
-    }
-
-    pub fn seq(&self) -> Seq {
-        self.seq
     }
 }
 

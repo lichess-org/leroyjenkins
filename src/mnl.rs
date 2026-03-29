@@ -9,7 +9,7 @@ use mnl_sys::{
     mnl_socket_get_portid, mnl_socket_open, mnl_socket_recvfrom, mnl_socket_sendto,
 };
 
-use crate::nftnl::Seq;
+use crate::seq::Seq;
 
 pub struct MnlSocket {
     inner: NonNull<mnl_socket>,
@@ -38,22 +38,23 @@ impl MnlSocket {
 
     pub fn send(&self, data: &[u8]) -> io::Result<()> {
         let ret = unsafe {
-            dbg!(mnl_socket_sendto(
+            mnl_socket_sendto(
                 self.inner.as_ptr(),
                 data.as_ptr().cast::<c_void>(),
                 data.len(),
-            ))
+            )
         };
         if ret == -1 {
             return Err(io::Error::last_os_error());
         }
         if ret as usize != data.len() {
-            return Err(io::Error::other("partial write for mnl_socket_sendto()"));
+            return Err(io::Error::other("partial write for mnl_socket_sendto"));
         }
         Ok(())
     }
 
     fn recv_raw(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        // TODO: Check alignment requirements
         let ret = unsafe {
             mnl_socket_recvfrom(
                 self.inner.as_ptr(),
@@ -70,21 +71,21 @@ impl MnlSocket {
     pub fn recv_and_validate(
         &mut self,
         buffer: &mut [u8],
-        seq: Seq,
+        seq: Option<Seq>,
         port_id: MnlPortId,
     ) -> io::Result<usize> {
         let num_bytes = self.recv_raw(buffer)?;
-        if unsafe {
-            dbg!(mnl_cb_run(
+        let ret = unsafe {
+            mnl_cb_run(
                 buffer.as_ptr().cast::<c_void>(),
                 num_bytes,
-                seq.0,
+                seq.map(u32::from).unwrap_or_default(),
                 port_id.0,
                 None,
                 ptr::null_mut(),
-            ))
-        } != 0
-        {
+            )
+        };
+        if dbg!(ret) != 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(num_bytes)
