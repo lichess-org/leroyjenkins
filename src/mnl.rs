@@ -74,6 +74,9 @@ impl MnlSocket {
         seq: Option<Seq>,
         port_id: MnlPortId,
     ) -> io::Result<usize> {
+        // Do recv as part of the safe wrapper, so that libmnl bug
+        // https://rustsec.org/advisories/RUSTSEC-2025-0142.html does not
+        // lead to unsoundness.
         let num_bytes = self.recv_raw(buffer)?;
         let ret = unsafe {
             mnl_cb_run(
@@ -85,7 +88,7 @@ impl MnlSocket {
                 ptr::null_mut(),
             )
         };
-        if dbg!(ret) != 0 {
+        if ret != 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(num_bytes)

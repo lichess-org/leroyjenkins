@@ -181,10 +181,12 @@ impl NlmsgBatch {
 
     pub fn end(&mut self, seq: Seq) {
         unsafe {
-            nftnl_batch_end(
-                mnl_nlmsg_batch_current(self.batch.as_ptr()).cast::<c_char>(),
-                u32::from(seq),
-            );
+            let ptr = mnl_nlmsg_batch_current(self.batch.as_ptr());
+            nftnl_batch_end(ptr.cast::<c_char>(), u32::from(seq));
+
+            // TODO: Requires kernel 6.10.
+            (*ptr.cast::<libc::nlmsghdr>()).nlmsg_flags |= libc::NLM_F_ACK as u16;
+
             assert!(
                 mnl_nlmsg_batch_next(self.batch.as_ptr()),
                 "mnl_nlmsg_batch_next after end"
