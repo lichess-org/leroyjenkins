@@ -91,5 +91,5 @@ tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --outpu
 Because it's Unix, use `bash` and `shuf` to ban a random IP every second for an hour with:
 
 ```sh
-while sleep 1; do echo `shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`.`shuf -i1-256 -n1`; done | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv6-set=leroy6 --ipv4-set=leroy4
+while sleep 1; do echo `shuf -i1-255 -n1`.`shuf -i1-255 -n1`.`shuf -i1-255 -n1`.`shuf -i1-255 -n1`; done | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv6-set=leroy6 --ipv4-set=leroy4
 ```
