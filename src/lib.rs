@@ -261,27 +261,31 @@ impl Leroy {
             let bytes = self.nlmsg_batch.as_bytes();
             socket.send(bytes)?;
 
-            let mut seen_error = false;
+            let mut recoverable_error = false;
             let port_id = socket.port_id();
             while let Err(err) =
                 socket.recv_and_validate(&mut self.nlmsg_recv_buffer, Some(seq), port_id)
             {
-                match err {
-                    err if seen_error && err.kind() == io::ErrorKind::WouldBlock => break,
-                    err if err.raw_os_error() == Some(libc::ENFILE) => {
+                match err.raw_os_error() {
+                    Some(libc::EAGAIN) if recoverable_error => break, // All errros drained
+                    Some(libc::ENFILE) => {
                         error!("Error ENFILE banning {ip}: Set full?");
-                        seen_error = true;
+                        recoverable_error = true;
                     }
-                    err if err.raw_os_error() == Some(libc::ENOENT) => {
+                    Some(libc::ENOENT) => {
                         error!("Error ENOENT banning {ip}: Table or set not created yet?");
-                        seen_error = true;
+                        recoverable_error = true;
                     }
-                    err if err.raw_os_error() == Some(libc::EPERM) => {
+                    Some(libc::EPERM) => {
                         error!("Error EPERM banning {ip}: Permission denied");
                         return Err(err); // Unrecoverable
                     }
-                    err => return Err(err), // Unknown, likely unrecoverable
+                    _ => return Err(err), // Unknown, likely unrecoverable
                 }
+            }
+
+            if recoverable_error {
+                return Ok(());
             }
         }
 
