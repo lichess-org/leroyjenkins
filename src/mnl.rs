@@ -1,6 +1,7 @@
 use std::{
+    alloc,
     ffi::{c_uint, c_void},
-    io,
+    io, mem,
     ptr::{self, NonNull},
 };
 
@@ -58,8 +59,7 @@ impl MnlSocket {
         Ok(())
     }
 
-    fn recv_raw(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        // TODO: Check alignment requirements
+    fn recv_raw(&mut self, buffer: &mut MnlReceiveBuffer) -> io::Result<usize> {
         let ret = unsafe {
             mnl_socket_recvfrom(
                 self.inner.as_ptr(),
@@ -75,7 +75,7 @@ impl MnlSocket {
 
     pub fn recv_and_validate(
         &mut self,
-        buffer: &mut [u8],
+        buffer: &mut MnlReceiveBuffer,
         seq: Option<Seq>,
         port_id: MnlPortId,
     ) -> io::Result<usize> {
@@ -112,3 +112,43 @@ impl Drop for MnlSocket {
 
 #[derive(Copy, Clone)]
 pub struct MnlPortId(pub c_uint);
+
+pub struct MnlReceiveBuffer {
+    ptr: *mut u8,
+    layout: alloc::Layout,
+}
+
+impl MnlReceiveBuffer {
+    pub fn new(size: usize) -> Self {
+        let layout = alloc::Layout::from_size_align(
+            size,
+            mem::align_of::<libc::nlmsghdr>(), // NLMSG_ALIGNTO
+        )
+        .expect("valid layout");
+
+        let ptr = unsafe { alloc::alloc(layout) };
+        if ptr.is_null() {
+            alloc::handle_alloc_error(layout);
+        }
+
+        MnlReceiveBuffer { ptr, layout }
+    }
+
+    pub fn as_ptr(&self) -> *const u8 {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.ptr
+    }
+
+    pub fn len(&self) -> usize {
+        self.layout.size()
+    }
+}
+
+impl Drop for MnlReceiveBuffer {
+    fn drop(&mut self) {
+        unsafe { alloc::dealloc(self.ptr, self.layout) };
+    }
+}

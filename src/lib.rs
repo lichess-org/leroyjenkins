@@ -29,7 +29,7 @@ use seq::SeqGenerator;
 
 use crate::{
     keyed_limiter::KeyedLimiter,
-    mnl::MnlSocket,
+    mnl::{MnlReceiveBuffer, MnlSocket},
     nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch},
 };
 
@@ -112,7 +112,7 @@ pub struct Leroy {
     socket: Option<MnlSocket>,
     seq_generator: SeqGenerator,
     nlmsg_batch: NlmsgBatch,
-    nlmsg_recv_buffer: Vec<u8>,
+    nlmsg_recv_buffer: MnlReceiveBuffer,
 
     ip_rate_limiters: Option<KeyedLimiter<Vec<u8>, BuildHasherDefault<FxHasher>>>,
     ban_cache: Cache<IpAddr, (), BuildHasherDefault<FxHasher>>,
@@ -133,7 +133,7 @@ impl Leroy {
             socket: (!args.dry_run).then(MnlSocket::new_netfilter).transpose()?,
             seq_generator: SeqGenerator::new(),
             nlmsg_batch: NlmsgBatch::new(),
-            nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
+            nlmsg_recv_buffer: MnlReceiveBuffer::new(MNL_SOCKET_BUFFER_SIZE() as usize),
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
                 Some(bl_threshold) => Some(KeyedLimiter::new(
                     Quota::with_period(args.bl_period)
@@ -264,7 +264,7 @@ impl Leroy {
             let mut seen_error = false;
             let port_id = socket.port_id();
             while let Err(err) =
-                socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], Some(seq), port_id)
+                socket.recv_and_validate(&mut self.nlmsg_recv_buffer, Some(seq), port_id)
             {
                 match err {
                     err if seen_error && err.kind() == io::ErrorKind::WouldBlock => break,
