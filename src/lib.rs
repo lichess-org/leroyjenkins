@@ -267,7 +267,7 @@ impl Leroy {
                 socket.recv_and_validate(&mut self.nlmsg_recv_buffer, Some(seq), port_id)
             {
                 match err.raw_os_error() {
-                    Some(libc::EAGAIN) if recoverable_error => break, // All errros drained
+                    Some(libc::EAGAIN) if recoverable_error => break, // All errors drained
                     Some(libc::ENFILE) => {
                         error!("Error ENFILE banning {ip}: Set full?");
                         recoverable_error = true;
