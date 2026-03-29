@@ -2,6 +2,7 @@
 #![feature(ip_as_octets)]
 
 mod keyed_limiter;
+mod mnl;
 mod nftnl;
 
 use std::{
@@ -26,6 +27,7 @@ use rustc_hash::FxHasher;
 
 use crate::{
     keyed_limiter::KeyedLimiter,
+    mnl::MnlSocket,
     nftnl::{NftnlSet, NftnlSetElem, NlmsgBatch, Seq},
 };
 
@@ -105,7 +107,7 @@ fn parse_duration(s: &str) -> Result<Duration, humantime::DurationError> {
 }
 
 pub struct Leroy {
-    socket: Option<mnl::Socket>,
+    socket: Option<MnlSocket>,
     nlmsg_batch: NlmsgBatch,
     nlmsg_recv_buffer: Vec<u8>,
 
@@ -125,9 +127,7 @@ pub struct Leroy {
 impl Leroy {
     pub fn new(args: Args) -> Result<Leroy, Box<dyn Error>> {
         let mut leroy = Leroy {
-            socket: (!args.dry_run)
-                .then(|| mnl::Socket::new(mnl::Bus::Netfilter))
-                .transpose()?,
+            socket: (!args.dry_run).then(MnlSocket::new_netfilter).transpose()?,
             nlmsg_batch: NlmsgBatch::new(Seq(0)),
             nlmsg_recv_buffer: vec![0; MNL_SOCKET_BUFFER_SIZE() as usize],
             ip_rate_limiters: match NonZeroU32::new(args.bl_threshold) {
@@ -246,15 +246,8 @@ impl Leroy {
 
         if let Some(socket) = &mut self.socket {
             let bytes = self.nlmsg_batch.as_bytes();
-            let tx = socket.send(bytes)?;
-            if tx != bytes.len() {
-                return Err(io::Error::other("did not send entire batch"));
-            }
-
-            for response in socket.recv(&mut self.nlmsg_recv_buffer[..])? {
-                let response = response?;
-                mnl::cb_run(response, seq.0, socket.portid())?;
-            }
+            socket.send(bytes)?;
+            socket.recv_and_validate(&mut self.nlmsg_recv_buffer[..], seq, socket.port_id())?;
         }
 
         info!(

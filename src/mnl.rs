@@ -1,0 +1,105 @@
+use std::{
+    ffi::{c_uint, c_void},
+    io,
+    ptr::{self, NonNull},
+};
+
+use mnl_sys::{
+    MNL_SOCKET_AUTOPID, mnl_cb_run, mnl_socket, mnl_socket_bind, mnl_socket_close,
+    mnl_socket_get_portid, mnl_socket_open, mnl_socket_recvfrom, mnl_socket_sendto,
+};
+
+use crate::nftnl::Seq;
+
+pub struct MnlSocket {
+    inner: NonNull<mnl_socket>,
+}
+
+impl MnlSocket {
+    pub fn new_netfilter() -> io::Result<Self> {
+        let mut socket = Self::open_netfilter()?;
+        socket.bind()?;
+        Ok(socket)
+    }
+
+    fn open_netfilter() -> io::Result<Self> {
+        Ok(MnlSocket {
+            inner: NonNull::new(unsafe { mnl_socket_open(libc::NETLINK_NETFILTER) })
+                .ok_or_else(io::Error::last_os_error)?,
+        })
+    }
+
+    fn bind(&mut self) -> io::Result<()> {
+        if unsafe { mnl_socket_bind(self.inner.as_ptr(), 0, MNL_SOCKET_AUTOPID) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn send(&self, data: &[u8]) -> io::Result<()> {
+        let ret = unsafe {
+            dbg!(mnl_socket_sendto(
+                self.inner.as_ptr(),
+                data.as_ptr().cast::<c_void>(),
+                data.len(),
+            ))
+        };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        if ret as usize != data.len() {
+            return Err(io::Error::other("partial write for mnl_socket_sendto()"));
+        }
+        Ok(())
+    }
+
+    fn recv_raw(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let ret = unsafe {
+            mnl_socket_recvfrom(
+                self.inner.as_ptr(),
+                buffer.as_mut_ptr().cast::<c_void>(),
+                buffer.len(),
+            )
+        };
+        if ret == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(ret as usize)
+    }
+
+    pub fn recv_and_validate(
+        &mut self,
+        buffer: &mut [u8],
+        seq: Seq,
+        port_id: MnlPortId,
+    ) -> io::Result<usize> {
+        let num_bytes = self.recv_raw(buffer)?;
+        if unsafe {
+            dbg!(mnl_cb_run(
+                buffer.as_ptr().cast::<c_void>(),
+                num_bytes,
+                seq.0,
+                port_id.0,
+                None,
+                ptr::null_mut(),
+            ))
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(num_bytes)
+    }
+
+    pub fn port_id(&self) -> MnlPortId {
+        MnlPortId(unsafe { mnl_socket_get_portid(self.inner.as_ptr()) })
+    }
+}
+
+impl Drop for MnlSocket {
+    fn drop(&mut self) {
+        unsafe { mnl_socket_close(self.inner.as_ptr()) };
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct MnlPortId(pub c_uint);

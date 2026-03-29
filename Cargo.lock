@@ -589,7 +589,6 @@ dependencies = [
  "log",
  "mimalloc",
  "mini-moka",
- "mnl",
  "mnl-sys",
  "nftnl-sys",
  "pretty_env_logger",
@@ -661,17 +660,6 @@ dependencies = [
  "smallvec",
  "tagptr",
  "triomphe",
-]
-
-[[package]]
-name = "mnl"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d3a616a69f9e3b7c5c3c9f707fe146bea1d2eef93b706271a9bc3f1070f71fb"
-dependencies = [
- "libc",
- "log",
- "mnl-sys",
 ]
 
 [[package]]
