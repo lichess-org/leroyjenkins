@@ -10,7 +10,7 @@ use std::{
     error::Error,
     ffi::CString,
     hash::BuildHasherDefault,
-    io,
+    io, mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     num::NonZeroU32,
     time::{Duration, Instant},
@@ -261,31 +261,30 @@ impl Leroy {
             let bytes = self.nlmsg_batch.as_bytes();
             socket.send(bytes)?;
 
-            let mut recoverable_error = false;
+            let mut seen_enfile = false;
             let port_id = socket.port_id();
             while let Err(err) =
                 socket.recv_and_validate(&mut self.nlmsg_recv_buffer, Some(seq), port_id)
             {
                 match err.raw_os_error() {
-                    Some(libc::EAGAIN) if recoverable_error => break, // All errors drained
+                    Some(libc::EAGAIN) if seen_enfile => return Ok(()), // All errors drained
                     Some(libc::ENFILE) => {
-                        error!("Error ENFILE banning {ip}: Set full?");
-                        recoverable_error = true;
+                        // Recoverable. Continue looking for other errors.
+                        // Usually sent twice (once for each NFT_MSG_NEWSETELEM) above.
+                        if !mem::replace(&mut seen_enfile, true) {
+                            error!("Error ENFILE banning {ip}: Set full?");
+                        }
                     }
                     Some(libc::ENOENT) => {
                         error!("Error ENOENT banning {ip}: Table or set not created yet?");
-                        recoverable_error = true;
+                        return Err(err);
                     }
                     Some(libc::EPERM) => {
                         error!("Error EPERM banning {ip}: Permission denied");
-                        return Err(err); // Unrecoverable
+                        return Err(err);
                     }
-                    _ => return Err(err), // Unknown, likely unrecoverable
+                    _ => return Err(err),
                 }
-            }
-
-            if recoverable_error {
-                return Ok(());
             }
         }
 
