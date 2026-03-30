@@ -279,7 +279,7 @@ impl Leroy {
                         warn!("Error ENOENT banning {ip}: Ignoring after ENFILE");
                     }
                     Some(libc::ENOENT) => {
-                        error!("Error ENOENT banning {ip}: Table or set not created yet?");
+                        error!("Error ENOENT banning {ip}: Table or set not created?");
                         return Err(err);
                     }
                     Some(libc::EPERM) => {
