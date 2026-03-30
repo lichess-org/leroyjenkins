@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         if line[line.len() - 1] == b'\n' {
             line.pop();
         }
-        leroy.handle_line(&line);
+        leroy.handle_line(&line)?;
         line.clear();
     }
 
