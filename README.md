@@ -13,10 +13,6 @@ tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1
 > [!WARNING]
 > *leroyjenkins* itself does nothing to your firewall rules. Use nftables rules similar to the ones below.
 
-> [!NOTE]
-> Must be run with enough privileges to actually modify nftables sets. Otherwise fails with a generic:
-> `Error: Os { code: 71, kind: Uncategorized, message: "Protocol error" }`
-
 ## Building
 
 ```sh
