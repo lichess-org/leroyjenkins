@@ -21,7 +21,7 @@ use governor::Quota;
 use libc::{
     NFPROTO_INET, NFT_MSG_DELSETELEM, NFT_MSG_NEWSETELEM, NLM_F_ACK, NLM_F_CREATE, NLM_F_REQUEST,
 };
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use mini_moka::unsync::Cache;
 use mnl_sys::MNL_SOCKET_BUFFER_SIZE;
 use rustc_hash::FxHasher;
@@ -274,6 +274,9 @@ impl Leroy {
                         if !mem::replace(&mut seen_enfile, true) {
                             error!("Error ENFILE banning {ip}: Set full?");
                         }
+                    }
+                    Some(libc::ENOENT) if seen_enfile => {
+                        warn!("Error ENOENT banning {ip}: Ignoring after ENFILE");
                     }
                     Some(libc::ENOENT) => {
                         error!("Error ENOENT banning {ip}: Table or set not created yet?");

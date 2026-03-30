@@ -93,7 +93,7 @@ impl MnlSocket {
                 ptr::null_mut(),
             )
         };
-        if ret != 0 {
+        if ret < 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(num_bytes)
