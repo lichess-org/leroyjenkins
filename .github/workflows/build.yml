@@ -14,6 +14,7 @@ jobs:
       contents: read
     container:
       image: debian:${{ matrix.debian }}
+      options: --cap-add NET_ADMIN
     steps:
       - name: Install system dependencies
         run: |
@@ -23,6 +24,8 @@ jobs:
             pkg-config \
             libnftnl-dev \
             libmnl-dev \
+            nftables \
+            python3-numpy \
             git
       - name: Checkout code
         uses: actions/checkout@v6
@@ -36,6 +39,13 @@ jobs:
         run: |
           ldd target/release/leroyjenkins
           ./target/release/leroyjenkins --version
+      - name: Integration test
+        run: |
+          nft add table inet leroy
+          nft add set inet leroy leroy4 '{ type ipv4_addr; size 2000; flags timeout; }'
+          nft add set inet leroy leroy6 '{ type ipv6_addr; size 2000; flags timeout; }'
+          python3 zipf-ips.py --seed=42 -4 | head -n 200000 | RUST_LOG=info ./target/release/leroyjenkins --bl-threshold=0 --ban-base-time=120s --ban-ttl=1d
+          nft list set inet leroy leroy4 | grep -qP '\d+\.\d+\.\d+\.\d+'
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
