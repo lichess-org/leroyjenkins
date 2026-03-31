@@ -83,6 +83,16 @@ tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --outpu
 ./zipf-ips.py | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv4-set=leroy4 --ipv6-set=leroy6
 ```
 
+## Development references
+
+Useful when working on `src/mnl.rs` / `src/nftnl.rs` or reasoning about netlink socket and ack/error semantics:
+
+- **libmnl**: https://git.netfilter.org/libmnl/ — socket lifecycle, `mnl_cb_run`, `SOCK_NONBLOCK` recv loop behavior; Rust wrapper: https://docs.rs/mnl-sys
+- **libnftnl**: https://git.netfilter.org/libnftnl/ — set/element attribute encoding (`nftnl_set_elem_set`, etc.); Rust wrapper: https://docs.rs/nftnl-sys
+- **libc**: https://docs.rs/libc — errno constants (`ENOENT`, `ENFILE`, `EPERM`, …) and netfilter protocol constants
+- **kernel `nf_tables_api.c`**: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/netfilter/nf_tables_api.c — authoritative source for which errors (`ENOENT`, `ENFILE`, …) each `NFT_MSG_*` operation can return and when acks are sent
+- **nft userspace**: https://git.netfilter.org/nftables/ — example for how batch messages and set element ops are constructed
+
 ## License
 
 *leroyjenkins* is licensed under the GLP 3 (or any later version at your option).

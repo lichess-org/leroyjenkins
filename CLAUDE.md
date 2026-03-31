@@ -111,3 +111,5 @@ nft list table inet leroy
 - `nftnl-sys` and `mnl-sys`: Rust bindings for libnftnl and libmnl, to communicate with nftables
 - `governor`: Rate limiting
 - `mini-moka`: Fast unsync cache
+
+See README "Development references" for libmnl, libnftnl, kernel `nf_tables_api.c`, and nft userspace source links. May ask the user to provide local clones.
