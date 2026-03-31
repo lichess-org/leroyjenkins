@@ -36,7 +36,7 @@ impl MnlSocket {
     }
 
     fn bind(&mut self) -> io::Result<()> {
-        if unsafe { mnl_socket_bind(self.inner.as_ptr(), 0, MNL_SOCKET_AUTOPID) } == -1 {
+        if unsafe { mnl_socket_bind(self.inner.as_ptr(), 0, MNL_SOCKET_AUTOPID) } < 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(())
@@ -50,7 +50,7 @@ impl MnlSocket {
                 data.len(),
             )
         };
-        if ret == -1 {
+        if ret < 0 {
             return Err(io::Error::last_os_error());
         }
         if ret as usize != data.len() {
@@ -67,7 +67,7 @@ impl MnlSocket {
                 buffer.len(),
             )
         };
-        if ret == -1 {
+        if ret < 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(ret as usize)
