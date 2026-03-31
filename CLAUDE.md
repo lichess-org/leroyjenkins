@@ -2,8 +2,7 @@
 
 This file provides guidance to Claude Code (https://claude.ai/code) when working with code in this repository.
 
-- When reporting information to me, be extremely concise and sacrifice
-  grammar for the sake of concision.
+- Be concise when reporting information.
 - To finalize a set of changes, ensure all tests pass and benchmarks runs.
   Format code.
 
@@ -28,12 +27,12 @@ cargo +nightly fmt
 cargo +nightly test
 ```
 
-**Run benchmarks:**
+**Run benchmarks (dry run):**
 ```sh
 cargo +nightly bench
 ```
 
-This project requires Rust nightly for the `addr_parse_ascii` feature.
+This project requires Rust nightly for the `addr_parse_ascii` and `ip_as_octets` features.
 
 ## Architecture
 
@@ -43,13 +42,18 @@ This project requires Rust nightly for the `addr_parse_ascii` feature.
 
 **src/lib.rs**: Contains the main `Leroy` struct and business logic:
 - **Rate limiting**: Uses `KeyedLimiter` wrapper around `governor` crate to track IPs and apply rate limits based on `--bl-threshold` and `--bl-period`
-- **Nftables management**: Holds `mnl::Socket` to communicate with the kernel
+- **Nftables management**: Holds `Option<MnlSocket>` (`None` in dry-run mode) to communicate with the kernel
 - **Recidivism tracking**: Two caches using `mini-moka`:
   - `ban_cache`: Short-lived cache to prevent duplicate nftables adds (TTL: `ban_base_time` - 1s)
   - `recidivism_counts`: Long-lived cache tracking how many times an IP has been banned (TTL: `ban_ttl`)
 - **Progressive banning**: Ban duration = `--ban-base-time` × recidivism_count (linear escalation)
+- **Ban mechanism**: add+delete+add netlink batch to reset timeout if element already exists in set
 
 **src/keyed_limiter.rs**: Custom unsync (single-threaded) implementation of a keyed rate limiter using `governor`. Includes automatic garbage collection that triggers when the internal HashMap reaches a threshold, removing stale entries.
+
+**src/mnl.rs**, **src/nftnl.rs**: Safe wrappers around `mnl-sys`/`nftnl-sys` for netlink socket I/O and nftables set element manipulation.
+
+**src/seq.rs**: Monotonic sequence number generator for netlink messages.
 
 ### Design Decisions
 
@@ -66,17 +70,24 @@ This project requires Rust nightly for the `addr_parse_ascii` feature.
 - Uses `FxHasher` (non-cryptographic) instead of default hasher for speed
 - `MiMalloc` allocator
 
+**Performance concessions for simplicity/robustness:**
+- Single-threaded
+- Read acknowledgements rather than fire and forget
+
 ## Common CLI Arguments
 
 ```
---bl-threshold=100   # Events before ban (use 0 for ban-on-sight)
---bl-period=1m       # Time window for threshold
---ban-base-time=100s # First ban duration
---ban-ttl=1d         # How long to remember recidivism
---table=leroy        # Name of table in nftables (must exist with protocol family inet)
---ipv4-set=leroy4    # IPv4 set name in nftables (must exist)
---ipv6-set=leroy6    # IPv6 set name in nftables (must exist)
---dry-run            # Test without touching nftables
+--bl-threshold=100              # Events before ban (use 0 for ban-on-sight)
+--bl-period=1m                  # Time window for threshold
+--ban-base-time=100s            # First ban duration
+--ban-ttl=1d                    # How long to remember recidivism
+--table=leroy                   # Name of table in nftables (must exist with protocol family inet)
+--ipv4-set=leroy4               # IPv4 set name in nftables (must exist)
+--ipv6-set=leroy6               # IPv6 set name in nftables (must exist)
+--dry-run                       # Test without touching nftables
+--cache-max-size=500000         # Max entries in recidivism cache
+--reporting-ban-time-period=1m  # How often to log ban rate
+--reporting-ip-time-period=10s  # How often to log line rate
 ```
 
 The nftables table `leroyjenkins` and sets must be created before running (unless using `--dry-run`). The tool will verify they exist on startup.
@@ -85,8 +96,8 @@ Example nftables setup:
 
 ```sh
 nft add table inet leroy
-nft add set inet leroy leroy4 '{ type ipv4_addr; flags timeout; }'
-nft add set inet leroy leroy6 '{ type ipv6_addr; flags timeout; }'
+nft add set inet leroy leroy4 '{ type ipv4_addr; size 100000; flags timeout; }'
+nft add set inet leroy leroy6 '{ type ipv6_addr; size 100000; flags timeout; }'
 ```
 
 Check state of the table and contents of the sets:

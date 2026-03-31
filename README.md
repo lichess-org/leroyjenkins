@@ -1,6 +1,6 @@
 # Leroy Jenkins
 
-Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_QD4a4) amongst [too much planning and inaction](https://www.youtube.com/watch?v=km5FAAQLUT8)
+Follow ban logs to manage ip sets in nftables -- used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_QD4a4) amongst [too much planning and inaction](https://www.youtube.com/watch?v=km5FAAQLUT8).
 
 ## Usage
 
@@ -10,7 +10,7 @@ Used when someone needs [to be decisive](https://www.youtube.com/watch?v=mLyOj_Q
 tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ban-base-time=100s --ban-ttl=1d --table=leroy --ipv6-set=leroy6 --ipv4-set=leroy4
 ```
 
-> [!WARNING]
+> [!NOTE]
 > *leroyjenkins* itself does nothing to your firewall rules. Use nftables rules similar to the ones below.
 
 ## Building
@@ -19,21 +19,15 @@ tail -F /tmp/ips.log | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1
 cargo +nightly build --release
 ```
 
-You need to install the nightly toolchain with `rustup`:
-
-```sh
-rustup toolchain install nightly
-```
-
 ## Setup
 
 Before running, create the nftables table and sets, leroy expects these to exist:
 
-```sh
+```
 #!/usr/sbin/nft -f
 
 table inet leroy {
-    # Define our sets
+    # define our sets
     set leroy4 {
         type ipv4_addr;
         timeout 60s;
@@ -48,21 +42,22 @@ table inet leroy {
         flags timeout;
     }
 
+    # arbitrary rules using the sets
     chain input {
         # accept everybody by default in this chain, with a really
         # high priority so that we can reject them as early as
-        # possible in the Netfilter system
+        # possible in the netfilter system
         type filter hook input priority -900; policy accept;
 
         # but if you match, you're out
-        ip  saddr @leroy4         counter name leroyed reject with tcp reset
-        ip6 saddr @leroy6         counter name leroyed reject with tcp reset
+        ip  saddr @leroy4 counter name leroyed reject with tcp reset
+        ip6 saddr @leroy6 counter name leroyed reject with tcp reset
     }
 
     chain output {
         # accept everybody by default in this chain, with a really
         # high priority so that we can reject them as early as
-        # possible in the Netfilter system
+        # possible in the netfilter system
         type filter hook output priority -900; policy accept;
 
         # but if you match, you're out
@@ -79,13 +74,15 @@ Because it reads from stdin and this is Unix, you can pipe stuff into it. Use `t
 ### Dig some lines out of some application log and use them to ban
 
 ```sh
-tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --output=L awk '{print $NF}' | leroyjenkins $LEROY_ARGS
+tail -F /var/log/app/app.ratelimit.log | ag 'naughty.behaviour' | stdbuf --output=L awk '{print $NF}' | RUST_LOG=info ./target/release/leroyjenkins --bl-period=1m --bl-threshold=100 --ban-base-time=100s --ban-ttl=1d
 ```
 
-### Ban random IPs!
-
-Because it's Unix, use `bash` and `shuf` to ban a random IP every second for an hour with:
+### Stress test with an infinite stream of random IPs
 
 ```sh
-while sleep 1; do echo `shuf -i1-255 -n1`.`shuf -i1-255 -n1`.`shuf -i1-255 -n1`.`shuf -i1-255 -n1`; done | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv6-set=leroy6 --ipv4-set=leroy4
+./zipf-ips.py | RUST_LOG=info ./target/release/leroyjenkins --bl-period=10s --bl-threshold=0 --ban-base-time=100s --ban-ttl=1h --table leroy --ipv4-set=leroy4 --ipv6-set=leroy6
 ```
+
+## License
+
+*leroyjenkins* is licensed under the GLP 3 (or any later version at your option).
