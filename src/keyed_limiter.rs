@@ -111,7 +111,7 @@ where
             rate_limiter: RateLimiter::new(
                 quota,
                 UnsyncHashMapStateStore::with_capacity_and_hasher(initial_capacity, hasher),
-                &DefaultClock::default(),
+                DefaultClock::default(),
             ),
             initial_capacity,
             next_gc_len: initial_capacity,
